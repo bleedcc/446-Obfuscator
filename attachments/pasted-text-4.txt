@@ -1,0 +1,83 @@
+DAILYFUSCATOR V3: FIX PREDICTABLE MAPPING AND DECOY WEAKNESSES
+
+Analyze and modify my existing Dailyfuscator V3 implementation. Focus on fixing the weakness demonstrated by this mapping:
+
+6f72:89fa48a4;d4:6f73:89fa48b5;d4:6f74:89fa48c6;d4:6f75:89fa48d7;d4:6f76:89fa48e8
+
+The right-hand values follow a predictable arithmetic progression. Do not assume this is the only weakness. Investigate how the mapping is generated, stored, and used by the actual decoder.
+
+1. Find the root cause
+
+Trace the mapping through the real source code:
+
+- Identify what each field represents.
+- Find the function that generates these entries.
+- Determine whether they are used during execution or are merely decoys.
+- Check whether the mapping can be recovered using a simple formula.
+- Identify whether the same formula, seed, or structure is reused throughout the output.
+- Determine whether recovering the mapping exposes actual constants, instructions, or program logic.
+
+Do not guess what the fields mean. Verify their purpose from the implementation.
+
+2. Remove predictable structure
+
+If the mapping is part of real protection, replace predictable sequential transformations with a better-designed encoding scheme.
+
+Requirements:
+
+- Avoid simple linear relationships between consecutive entries.
+- Avoid fixed global mappings reused across builds.
+- Use per-build variation with a reproducible seed option.
+- Ensure encoding and decoding remain mathematically consistent.
+- Prevent changes from corrupting legitimate constants or instruction operands.
+- Do not rely on a secret key embedded in the output as the only security measure.
+
+Do not merely randomize the displayed numbers while preserving an easily recoverable underlying mapping.
+
+3. Protect the actual logic
+
+Inspect whether the mapping reveals:
+
+- Original strings and constants.
+- Bytecode instructions.
+- VM opcode assignments.
+- Branch conditions.
+- Function boundaries.
+- Control-flow relationships.
+
+Fix the actual leak wherever it exists. If the mapping is only decorative noise, explain that and investigate the real VM instead.
+
+4. Test reconstruction resistance
+
+Create harmless test programs with known source code and evaluate whether the protected output permits:
+
+- Direct extraction of constants.
+- Recovery of the mapping formula.
+- Identification of instruction boundaries.
+- Recovery of conditional branches.
+- Simplification of the VM into equivalent Lua operations.
+
+Record the actual results. Do not claim the output is impossible to reverse engineer.
+
+5. Preserve mandatory requirements
+
+- Keep the existing Dailyfuscator features.
+- Preserve supported Lua/Luau program behavior.
+- Keep the minimum output size at 512,000 bytes.
+- Measure actual output size after writing the file.
+- Ensure generated output remains valid and executable.
+- Return the complete modified project, not isolated snippets.
+
+6. Final deliverables
+
+Provide:
+
+1. The root cause of the predictable mapping.
+2. The exact source files changed.
+3. The implemented fix.
+4. Tests showing the mapping no longer follows the identified pattern where applicable.
+5. Behavioral regression-test results.
+6. The exact final output size.
+7. Remaining weaknesses discovered during testing.
+
+Priority: fix the actual encoding and decoding mechanism, not merely its appearance. Do not add filler or claim stronger protection without evidence.

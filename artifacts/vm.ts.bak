@@ -1,0 +1,903 @@
+import type { Expr, Stmt } from "./ast.ts";
+import { canonicalNumber } from "./codec.ts";
+
+export const OP = {
+  MOVE: 0,
+  LOADK: 1,
+  LOADNIL: 2,
+  LOADBOOL: 3,
+  GETG: 4,
+  SETG: 5,
+  GETT: 6,
+  SETT: 7,
+  NEWT: 8,
+  ADD: 9,
+  SUB: 10,
+  MUL: 11,
+  DIV: 12,
+  MOD: 13,
+  POW: 14,
+  UNM: 15,
+  NOT: 16,
+  LEN: 17,
+  CONCAT: 18,
+  LT: 19,
+  LE: 20,
+  EQ: 21,
+  TEST: 22,
+  JMP: 23,
+  CALL: 24,
+  RETURN: 25,
+  CLOSURE: 26,
+} as const;
+
+export const OP_COUNT = 27;
+
+export interface RawConst {
+  k: "s" | "n" | "b" | "z";
+  s?: string;
+  n?: number;
+}
+
+export interface Proto {
+  code: number[][];
+  consts: RawConst[];
+  nparams: number;
+  maxReg: number;
+  globals: string[];
+  userKey: string;
+}
+
+export interface VmStats {
+  virtualized: number;
+  skipped: Record<string, number>;
+}
+
+class AbortCompile extends Error {}
+
+export function virtualize(body: Stmt[], enabled: boolean): { body: Stmt[]; protos: Proto[]; stats: VmStats } {
+  const protos: Proto[] = [];
+  const stats: VmStats = { virtualized: 0, skipped: {} };
+  if (!enabled) {
+    stats.skipped.disabled = 1;
+    return { body, protos, stats };
+  }
+  const chunk = tryCompileChunk(body, protos);
+  if (chunk) {
+    protos.push(chunk);
+    stats.virtualized = protos.length;
+    const index = protos.length;
+    return {
+      body: [
+        {
+          type: "return",
+          values: [
+            {
+              type: "call",
+              callee: { type: "name", name: "__DF_VM" },
+              args: [
+                { type: "number", value: index, raw: String(index), force: true },
+                { type: "nil" },
+              ],
+              method: null,
+            },
+          ],
+        },
+      ],
+      protos,
+      stats,
+    };
+  }
+  if (!bodyHasFunction(body) && !blockUsesVararg(body)) {
+    const proto = compileFunction([], body, "");
+    if (proto) {
+      protos.push(proto);
+      stats.virtualized++;
+      return {
+        body: [
+          {
+            type: "return",
+            values: [
+              {
+                type: "call",
+                callee: { type: "name", name: "__DF_VM" },
+                args: [
+                  { type: "number", value: 1, raw: "1", force: true },
+                  { type: "nil" },
+                ],
+                method: null,
+              },
+            ],
+          },
+        ],
+        protos,
+        stats,
+      };
+    }
+    bump(stats, "chunk");
+  }
+  return { body: virtStmts(body, new Set(), protos, stats), protos, stats };
+}
+
+function bump(stats: VmStats, key: string) {
+  stats.skipped[key] = (stats.skipped[key] ?? 0) + 1;
+}
+
+function virtStmts(stmts: Stmt[], outer: Set<string>, protos: Proto[], stats: VmStats): Stmt[] {
+  const scope = new Set(outer);
+  return stmts.map((s) => virtStmt(s, scope, protos, stats));
+}
+
+function virtStmt(s: Stmt, scope: Set<string>, protos: Proto[], stats: VmStats): Stmt {
+  switch (s.type) {
+    case "local": {
+      const inits = s.inits.map((e) => virtExpr(e, scope, protos, stats));
+      for (const n of s.names) scope.add(n);
+      return { ...s, inits };
+    }
+    case "assign":
+      return {
+        ...s,
+        targets: s.targets.map((e) => virtExpr(e, scope, protos, stats)),
+        values: s.values.map((e) => virtExpr(e, scope, protos, stats)),
+      };
+    case "call":
+      return { ...s, expr: virtExpr(s.expr, scope, protos, stats) as Extract<Expr, { type: "call" }> };
+    case "do":
+      return { ...s, body: virtStmts(s.body, new Set(scope), protos, stats) };
+    case "while":
+      return {
+        ...s,
+        cond: virtExpr(s.cond, scope, protos, stats),
+        body: virtStmts(s.body, new Set(scope), protos, stats),
+      };
+    case "if":
+      return {
+        ...s,
+        arms: s.arms.map((a) => ({
+          cond: virtExpr(a.cond, scope, protos, stats),
+          body: virtStmts(a.body, new Set(scope), protos, stats),
+        })),
+        elseBody: s.elseBody ? virtStmts(s.elseBody, new Set(scope), protos, stats) : null,
+      };
+    case "function": {
+      if (s.local) scope.add(s.name.path[0]);
+      const owned = new Set(scope);
+      const wrapped = wrapFunction(s.params, s.vararg, s.body, s.flags, owned, s.flags?.encKey ?? "", protos, stats);
+      if (!wrapped) {
+        const innerScope = new Set(owned);
+        for (const p of s.params) innerScope.add(p);
+        if (s.name.method) innerScope.add("self");
+        return { ...s, body: virtStmts(s.body, innerScope, protos, stats) };
+      }
+      stats.virtualized++;
+      return {
+        ...s,
+        params: wrapped.params,
+        vararg: wrapped.vararg,
+        flags: { ...s.flags, locked: true, noVirtualize: true },
+        body: wrapped.body,
+      };
+    }
+    case "return":
+      return { ...s, values: s.values.map((e) => virtExpr(e, scope, protos, stats)) };
+    default:
+      return s;
+  }
+}
+
+function virtExpr(e: Expr, scope: Set<string>, protos: Proto[], stats: VmStats): Expr {
+  switch (e.type) {
+    case "function": {
+      const wrapped = wrapFunction(e.params, e.vararg, e.body, e.flags, scope, e.flags?.encKey ?? "", protos, stats);
+      if (!wrapped) {
+        const inner = new Set(scope);
+        for (const p of e.params) inner.add(p);
+        return { ...e, body: virtStmts(e.body, inner, protos, stats) };
+      }
+      stats.virtualized++;
+      return {
+        type: "function",
+        params: wrapped.params,
+        vararg: wrapped.vararg,
+        flags: { ...e.flags, locked: true, noVirtualize: true },
+        body: wrapped.body,
+      };
+    }
+    case "unary":
+      return { ...e, arg: virtExpr(e.arg, scope, protos, stats) };
+    case "binary":
+      return {
+        ...e,
+        left: virtExpr(e.left, scope, protos, stats),
+        right: virtExpr(e.right, scope, protos, stats),
+      };
+    case "index":
+      return {
+        ...e,
+        object: virtExpr(e.object, scope, protos, stats),
+        index: virtExpr(e.index, scope, protos, stats),
+      };
+    case "paren":
+      return { ...e, expr: virtExpr(e.expr, scope, protos, stats) };
+    case "call":
+      return {
+        ...e,
+        callee: virtExpr(e.callee, scope, protos, stats),
+        args: e.args.map((a) => virtExpr(a, scope, protos, stats)),
+      };
+    case "table":
+      return {
+        ...e,
+        fields: e.fields.map((f) => ({
+          key: f.key ? virtExpr(f.key, scope, protos, stats) : null,
+          value: virtExpr(f.value, scope, protos, stats),
+        })),
+      };
+    default:
+      return e;
+  }
+}
+
+function wrapFunction(
+  params: string[],
+  vararg: boolean,
+  body: Stmt[],
+  flags: { locked?: boolean; noVirtualize?: boolean; jit?: boolean; encKey?: string } | undefined,
+  outer: Set<string>,
+  userKey: string,
+  protos: Proto[],
+  stats: VmStats,
+): { params: string[]; vararg: boolean; body: Stmt[] } | null {
+  if (flags?.locked || flags?.noVirtualize || flags?.jit) {
+    bump(stats, flags?.jit ? "jit" : "no-virtualize");
+    return null;
+  }
+  if (vararg && blockUsesVararg(body)) {
+    bump(stats, "vararg");
+    return null;
+  }
+  if (bodyHasFunction(body)) {
+    bump(stats, "nested-function");
+    return null;
+  }
+  if (capturesUpvalue(params, body, outer)) {
+    bump(stats, "upvalue");
+    return null;
+  }
+  const proto = compileFunction(params, body, userKey);
+  if (!proto) {
+    bump(stats, "unsupported");
+    return null;
+  }
+  protos.push(proto);
+  const index = protos.length;
+  const key: Expr = userKey ? { type: "name", name: "_dfk" } : { type: "nil" };
+  const args: Expr[] = [
+    { type: "number", value: index, raw: String(index), force: true },
+    key,
+    ...params.map((p) => ({ type: "name", name: p }) as Expr),
+  ];
+  if (vararg) {
+    return {
+      params: [],
+      vararg: true,
+      body: [
+        {
+          type: "return",
+          values: [
+            {
+              type: "call",
+              callee: { type: "name", name: "__DF_VM" },
+              args: [
+                { type: "number", value: index, raw: String(index), force: true },
+                key,
+                { type: "vararg" },
+              ],
+              method: null,
+            },
+          ],
+        },
+      ],
+    };
+  }
+  return {
+    params,
+    vararg: false,
+    body: [
+      {
+        type: "return",
+        values: [
+          { type: "call", callee: { type: "name", name: "__DF_VM" }, args, method: null },
+        ],
+      },
+    ],
+  };
+}
+
+function tryCompileChunk(body: Stmt[], protos: Proto[]): Proto | null {
+  if (blockUsesVararg(body)) return null;
+  try {
+    const c = new Compiler([], "", protos);
+    c.compileBlock(body);
+    c.emit(OP.RETURN, 0, 0, 0);
+    return {
+      code: c.code,
+      consts: c.consts,
+      nparams: 0,
+      maxReg: Math.max(1, c.maxReg),
+      globals: [...c.globals],
+      userKey: "",
+    };
+  } catch (err) {
+    protos.length = 0;
+    if (err instanceof AbortCompile) return null;
+    throw err;
+  }
+}
+
+function bodyHasFunction(stmts: Stmt[]): boolean {
+  const walkE = (e: Expr): boolean => {
+    if (e.type === "function") return true;
+    return exprsOf(e).some(walkE);
+  };
+  const walkS = (s: Stmt): boolean => {
+    if (s.type === "function") return true;
+    return stmtsOf(s).some(walkS) || exprsOfStmt(s).some(walkE);
+  };
+  return stmts.some(walkS);
+}
+
+function blockUsesVararg(stmts: Stmt[]): boolean {
+  const walkE = (e: Expr): boolean => e.type === "vararg" || exprsOf(e).some(walkE);
+  const walkS = (s: Stmt): boolean => {
+    if (s.type === "function") return false;
+    return exprsOfStmt(s).some(walkE) || stmtsOf(s).some(walkS);
+  };
+  return stmts.some(walkS);
+}
+
+function capturesUpvalue(params: string[], body: Stmt[], outer: Set<string>): boolean {
+  const free = new Set<string>();
+  const scope = new Set(params);
+  scanStmts(body, scope, free, outer);
+  return free.size > 0;
+}
+
+function scanStmts(stmts: Stmt[], scope: Set<string>, free: Set<string>, outer: Set<string>) {
+  for (const s of stmts) {
+    if (s.type === "local") {
+      s.inits.forEach((e) => scanExpr(e, scope, free, outer));
+      s.names.forEach((n) => scope.add(n));
+    } else if (s.type === "function") {
+      const inner = new Set(scope);
+      if (s.local) inner.add(s.name.path[0]);
+      s.params.forEach((p) => inner.add(p));
+      if (s.name.method) inner.add("self");
+      scanStmts(s.body, inner, free, outer);
+    } else {
+      exprsOfStmt(s).forEach((e) => scanExpr(e, scope, free, outer));
+      if (s.type === "do" || s.type === "while") scanStmts(s.body, new Set(scope), free, outer);
+      if (s.type === "if") {
+        s.arms.forEach((a) => scanStmts(a.body, new Set(scope), free, outer));
+        if (s.elseBody) scanStmts(s.elseBody, new Set(scope), free, outer);
+      }
+    }
+  }
+}
+
+function scanExpr(e: Expr, scope: Set<string>, free: Set<string>, outer: Set<string>) {
+  if (e.type === "name") {
+    if (!scope.has(e.name) && outer.has(e.name)) free.add(e.name);
+    return;
+  }
+  if (e.type === "function") {
+    const inner = new Set(scope);
+    e.params.forEach((p) => inner.add(p));
+    scanStmts(e.body, inner, free, outer);
+    return;
+  }
+  exprsOf(e).forEach((c) => scanExpr(c, scope, free, outer));
+}
+
+function exprsOf(e: Expr): Expr[] {
+  switch (e.type) {
+    case "unary":
+      return [e.arg];
+    case "binary":
+      return [e.left, e.right];
+    case "index":
+      return [e.object, e.index];
+    case "paren":
+      return [e.expr];
+    case "call":
+      return [e.callee, ...e.args];
+    case "table":
+      return e.fields.flatMap((f) => (f.key ? [f.key, f.value] : [f.value]));
+    default:
+      return [];
+  }
+}
+
+function exprsOfStmt(s: Stmt): Expr[] {
+  switch (s.type) {
+    case "local":
+      return s.inits;
+    case "assign":
+      return [...s.targets, ...s.values];
+    case "call":
+      return [s.expr];
+    case "while":
+      return [s.cond];
+    case "if":
+      return s.arms.map((a) => a.cond);
+    case "return":
+      return s.values;
+    default:
+      return [];
+  }
+}
+
+function stmtsOf(s: Stmt): Stmt[] {
+  switch (s.type) {
+    case "do":
+    case "while":
+    case "function":
+      return s.body;
+    case "if":
+      return [...s.arms.flatMap((a) => a.body), ...(s.elseBody ?? [])];
+    default:
+      return [];
+  }
+}
+
+function compileFunction(params: string[], body: Stmt[], userKey: string): Proto | null {
+  try {
+    const c = new Compiler(params, userKey);
+    c.compileBlock(body);
+    c.emit(OP.RETURN, 0, 0, 0);
+    return {
+      code: c.code,
+      consts: c.consts,
+      nparams: params.length,
+      maxReg: Math.max(1, c.maxReg),
+      globals: [...c.globals],
+      userKey,
+    };
+  } catch (err) {
+    if (err instanceof AbortCompile) return null;
+    throw err;
+  }
+}
+
+class Compiler {
+  code: number[][] = [];
+  consts: RawConst[] = [];
+  globals = new Set<string>();
+  maxReg = 1;
+  private nextReg: number;
+  private scopes: Map<string, number>[] = [new Map()];
+  private breaks: number[][] = [];
+  private userKey: string;
+  private protos: Proto[] | null;
+
+  constructor(params: string[], userKey: string, protos: Proto[] | null = null) {
+    this.userKey = userKey;
+    this.protos = protos;
+    this.nextReg = 1;
+    for (const p of params) {
+      const r = this.nextReg++;
+      this.scopes[0].set(p, r);
+    }
+    this.maxReg = Math.max(1, this.nextReg - 1);
+    void this.userKey;
+  }
+
+  compileBlock(stmts: Stmt[]) {
+    for (const s of stmts) this.compileStmt(s);
+  }
+
+  private compileStmt(s: Stmt) {
+    switch (s.type) {
+      case "empty":
+        return;
+      case "local":
+        return this.compileLocal(s.names, s.inits);
+      case "assign":
+        return this.compileAssign(s.targets, s.values);
+      case "call":
+        if (s.expr.type !== "call") throw new AbortCompile();
+        this.compileCall(s.expr, 0);
+        return;
+      case "do":
+        this.push();
+        this.compileBlock(s.body);
+        this.pop();
+        return;
+      case "while":
+        return this.compileWhile(s);
+      case "if":
+        return this.compileIf(s);
+      case "break": {
+        if (!this.breaks.length) throw new AbortCompile();
+        const j = this.emit(OP.JMP, 0, 0, 0);
+        this.breaks[this.breaks.length - 1].push(j);
+        return;
+      }
+      case "return":
+        return this.compileReturn(s.values);
+      case "function":
+        return this.compileFunctionStmt(s);
+      default:
+        throw new AbortCompile();
+    }
+  }
+
+  private compileFunctionStmt(s: Extract<Stmt, { type: "function" }>) {
+    if (!this.protos || s.name.method || s.name.path.length !== 1 || s.flags?.jit || s.flags?.noVirtualize || s.flags?.locked) {
+      throw new AbortCompile();
+    }
+    const name = s.name.path[0];
+    const slot = s.local ? this.alloc(1) : 0;
+    if (s.local) this.bind(name, slot);
+    const index = this.spawnProto(s.params, s.vararg, s.body);
+    const r = this.temp();
+    this.emit(OP.CLOSURE, r, index, 0);
+    if (s.local) this.emit(OP.MOVE, slot, r, 0);
+    else {
+      this.globals.add(name);
+      this.emit(OP.SETG, r, this.constString(name), 0);
+    }
+  }
+
+  private spawnProto(params: string[], vararg: boolean, body: Stmt[]): number {
+    if (!this.protos) throw new AbortCompile();
+    if (vararg && blockUsesVararg(body)) throw new AbortCompile();
+    if (capturesUpvalue(params, body, this.boundNames())) throw new AbortCompile();
+    const nested = new Compiler(params, "", this.protos);
+    nested.compileBlock(body);
+    nested.emit(OP.RETURN, 0, 0, 0);
+    this.protos.push({
+      code: nested.code,
+      consts: nested.consts,
+      nparams: params.length,
+      maxReg: Math.max(1, nested.maxReg),
+      globals: [...nested.globals],
+      userKey: "",
+    });
+    return this.protos.length;
+  }
+
+  private boundNames(): Set<string> {
+    const names = new Set<string>();
+    for (const scope of this.scopes) for (const name of scope.keys()) names.add(name);
+    return names;
+  }
+
+  private compileLocal(names: string[], inits: Expr[]) {
+    const regs = this.compileList(inits, names.length);
+    names.forEach((name, i) => {
+      const slot = this.alloc(1);
+      this.bind(name, slot);
+      this.emit(OP.MOVE, slot, regs[i], 0);
+    });
+  }
+
+  private compileAssign(targets: Expr[], values: Expr[]) {
+    const regs = this.compileList(values, targets.length);
+    const lhs: { kind: "name"; name: string } | { kind: "index"; obj: number; key: number }[] = [];
+    const slots: ({ kind: "name"; name: string } | { kind: "index"; obj: number; key: number })[] = [];
+    for (const t of targets) {
+      if (t.type === "name") slots.push({ kind: "name", name: t.name });
+      else if (t.type === "index") {
+        slots.push({ kind: "index", obj: this.compileExpr(t.object), key: this.compileExpr(t.index) });
+      } else throw new AbortCompile();
+    }
+    void lhs;
+    for (let i = 0; i < slots.length; i++) {
+      const slot = slots[i];
+      if (slot.kind === "name") {
+        const loc = this.lookup(slot.name);
+        if (loc != null) this.emit(OP.MOVE, loc, regs[i], 0);
+        else {
+          this.globals.add(slot.name);
+          this.emit(OP.SETG, regs[i], this.constString(slot.name), 0);
+        }
+      } else this.emit(OP.SETT, slot.obj, slot.key, regs[i]);
+    }
+  }
+
+  private compileWhile(s: Extract<Stmt, { type: "while" }>) {
+    const start = this.pc();
+    const r = this.compileExpr(s.cond);
+    this.emit(OP.TEST, r, 0, 1);
+    const jmpEnd = this.emit(OP.JMP, 0, 0, 0);
+    this.breaks.push([]);
+    this.push();
+    this.compileBlock(s.body);
+    this.pop();
+    this.emit(OP.JMP, 0, start, 0);
+    const end = this.pc();
+    this.patch(jmpEnd, end);
+    for (const j of this.breaks.pop()!) this.patch(j, end);
+  }
+
+  private compileIf(s: Extract<Stmt, { type: "if" }>) {
+    const endJmps: number[] = [];
+    for (const arm of s.arms) {
+      const r = this.compileExpr(arm.cond);
+      this.emit(OP.TEST, r, 0, 1);
+      const jmpNext = this.emit(OP.JMP, 0, 0, 0);
+      this.push();
+      this.compileBlock(arm.body);
+      this.pop();
+      endJmps.push(this.emit(OP.JMP, 0, 0, 0));
+      this.patch(jmpNext, this.pc());
+    }
+    if (s.elseBody) {
+      this.push();
+      this.compileBlock(s.elseBody);
+      this.pop();
+    }
+    const end = this.pc();
+    for (const j of endJmps) this.patch(j, end);
+  }
+
+  private compileReturn(values: Expr[]) {
+    if (values.length === 1 && values[0].type === "call") {
+      const base = this.compileCall(values[0], -1);
+      this.emit(OP.RETURN, base, -1, 0);
+      return;
+    }
+    const regs = this.compileList(values, values.length);
+    if (!regs.length) {
+      this.emit(OP.RETURN, 0, 0, 0);
+      return;
+    }
+    const start = this.alloc(regs.length);
+    regs.forEach((r, i) => this.emit(OP.MOVE, start + i, r, 0));
+    this.emit(OP.RETURN, start, regs.length, 0);
+  }
+
+  private compileList(exprs: Expr[], nwanted: number): number[] {
+    if (!exprs.length) return Array.from({ length: nwanted }, () => this.nilReg());
+    const out: number[] = [];
+    for (let i = 0; i < exprs.length; i++) {
+      const last = i === exprs.length - 1;
+      const e = exprs[i];
+      if (last && e.type === "call") {
+        const need = Math.max(0, nwanted - out.length);
+        const base = this.compileCall(e, need);
+        for (let j = 0; j < need; j++) out.push(base + j);
+      } else out.push(this.compileExpr(e));
+    }
+    while (out.length < nwanted) out.push(this.nilReg());
+    return out;
+  }
+
+  private compileExpr(e: Expr): number {
+    switch (e.type) {
+      case "paren":
+        return this.compileExpr(e.expr);
+      case "nil":
+        return this.nilReg();
+      case "boolean": {
+        const r = this.temp();
+        this.emit(OP.LOADBOOL, r, e.value ? 1 : 0, 0);
+        return r;
+      }
+      case "number": {
+        const r = this.temp();
+        this.emit(OP.LOADK, r, this.constNumber(e.value), 0);
+        return r;
+      }
+      case "string": {
+        const r = this.temp();
+        this.emit(OP.LOADK, r, this.constString(e.value), 0);
+        return r;
+      }
+      case "name": {
+        const loc = this.lookup(e.name);
+        if (loc != null) return loc;
+        this.globals.add(e.name);
+        const r = this.temp();
+        this.emit(OP.GETG, r, this.constString(e.name), 0);
+        return r;
+      }
+      case "unary":
+        return this.compileUnary(e);
+      case "binary":
+        return this.compileBinary(e);
+      case "index": {
+        const obj = this.compileExpr(e.object);
+        const key = this.compileExpr(e.index);
+        const dest = this.temp();
+        this.emit(OP.GETT, dest, obj, key);
+        return dest;
+      }
+      case "call":
+        return this.compileCall(e, 1);
+      case "function": {
+        if (!this.protos || e.flags?.jit || e.flags?.noVirtualize || e.flags?.locked) throw new AbortCompile();
+        const index = this.spawnProto(e.params, e.vararg, e.body);
+        const r = this.temp();
+        this.emit(OP.CLOSURE, r, index, 0);
+        return r;
+      }
+      case "table":
+        return this.compileTable(e);
+      default:
+        throw new AbortCompile();
+    }
+  }
+
+  private compileUnary(e: Extract<Expr, { type: "unary" }>): number {
+    const src = this.compileExpr(e.arg);
+    const dest = this.temp();
+    if (e.op === "-") this.emit(OP.UNM, dest, src, 0);
+    else if (e.op === "not") this.emit(OP.NOT, dest, src, 0);
+    else if (e.op === "#") this.emit(OP.LEN, dest, src, 0);
+    else throw new AbortCompile();
+    return dest;
+  }
+
+  private compileBinary(e: Extract<Expr, { type: "binary" }>): number {
+    if (e.op === "and" || e.op === "or") {
+      const left = this.compileExpr(e.left);
+      const dest = this.temp();
+      this.emit(OP.MOVE, dest, left, 0);
+      this.emit(OP.TEST, dest, 0, e.op === "and" ? 1 : 0);
+      const jmp = this.emit(OP.JMP, 0, 0, 0);
+      const right = this.compileExpr(e.right);
+      this.emit(OP.MOVE, dest, right, 0);
+      this.patch(jmp, this.pc());
+      return dest;
+    }
+    if (e.op === "..") {
+      const left = this.compileExpr(e.left);
+      const right = this.compileExpr(e.right);
+      const dest = this.temp();
+      const a = this.temp();
+      const b = this.temp();
+      this.emit(OP.MOVE, a, left, 0);
+      this.emit(OP.MOVE, b, right, 0);
+      this.emit(OP.CONCAT, dest, a, b);
+      return dest;
+    }
+    const left = this.compileExpr(e.left);
+    const right = this.compileExpr(e.right);
+    const dest = this.temp();
+    const map: Record<string, number> = {
+      "+": OP.ADD,
+      "-": OP.SUB,
+      "*": OP.MUL,
+      "/": OP.DIV,
+      "%": OP.MOD,
+      "^": OP.POW,
+      "<": OP.LT,
+      "<=": OP.LE,
+      ">": OP.LT,
+      ">=": OP.LE,
+      "==": OP.EQ,
+      "~=": OP.EQ,
+    };
+    const op = map[e.op];
+    if (op == null) throw new AbortCompile();
+    if (e.op === ">" || e.op === ">=") {
+      this.emit(op, dest, right, left);
+      return dest;
+    }
+    this.emit(op, dest, left, right);
+    if (e.op === "~=") {
+      const n = this.temp();
+      this.emit(OP.NOT, n, dest, 0);
+      return n;
+    }
+    return dest;
+  }
+
+  private compileTable(e: Extract<Expr, { type: "table" }>): number {
+    for (const f of e.fields) {
+      if (!f.key && (f.value.type === "call" || f.value.type === "vararg")) throw new AbortCompile();
+    }
+    const t = this.temp();
+    this.emit(OP.NEWT, t, 0, 0);
+    let index = 1;
+    for (const f of e.fields) {
+      const key = f.key ? this.compileExpr(f.key) : this.constToReg(index++);
+      const value = this.compileExpr(f.value);
+      this.emit(OP.SETT, t, key, value);
+    }
+    return t;
+  }
+
+  private constToReg(n: number): number {
+    const r = this.temp();
+    this.emit(OP.LOADK, r, this.constNumber(n), 0);
+    return r;
+  }
+
+  private compileCall(e: Extract<Expr, { type: "call" }>, nresults: number): number {
+    const obj = e.method ? this.compileExpr(e.callee) : null;
+    const plainFn = e.method ? null : this.compileExpr(e.callee);
+    const argRegs: number[] = [];
+    if (obj != null) argRegs.push(obj);
+    for (const a of e.args) argRegs.push(this.compileExpr(a));
+    let fn: number;
+    if (obj != null) {
+      const key = this.temp();
+      this.emit(OP.LOADK, key, this.constString(e.method!), 0);
+      fn = this.temp();
+      this.emit(OP.GETT, fn, obj, key);
+    } else fn = plainFn!;
+    const slots = Math.max(1 + argRegs.length, nresults < 0 ? 1 + argRegs.length : Math.max(nresults, 1));
+    const base = this.alloc(slots);
+    this.emit(OP.MOVE, base, fn, 0);
+    argRegs.forEach((r, i) => this.emit(OP.MOVE, base + 1 + i, r, 0));
+    this.emit(OP.CALL, base, argRegs.length, nresults < 0 ? -1 : nresults);
+    return base;
+  }
+
+  private nilReg(): number {
+    const r = this.temp();
+    this.emit(OP.LOADNIL, r, 0, 0);
+    return r;
+  }
+
+  private constString(s: string): number {
+    this.consts.push({ k: "s", s });
+    return this.consts.length;
+  }
+
+  private constNumber(n: number): number {
+    const canon = canonicalNumber(n);
+    if (canon == null) throw new AbortCompile();
+    this.consts.push({ k: "n", n, s: canon });
+    return this.consts.length;
+  }
+
+  private lookup(name: string): number | null {
+    for (let i = this.scopes.length - 1; i >= 0; i--) {
+      const v = this.scopes[i].get(name);
+      if (v !== undefined) return v;
+    }
+    return null;
+  }
+
+  private bind(name: string, reg: number) {
+    this.scopes[this.scopes.length - 1].set(name, reg);
+  }
+
+  private push() {
+    this.scopes.push(new Map());
+  }
+
+  private pop() {
+    this.scopes.pop();
+  }
+
+  private alloc(n: number): number {
+    const r = this.nextReg;
+    this.nextReg += n;
+    if (this.nextReg > 220) throw new AbortCompile();
+    this.maxReg = Math.max(this.maxReg, this.nextReg - 1);
+    return r;
+  }
+
+  private temp(): number {
+    return this.alloc(1);
+  }
+
+  private emit(op: number, a = 0, b = 0, c = 0): number {
+    this.code.push([op, a, b, c]);
+    return this.code.length;
+  }
+
+  private pc(): number {
+    return this.code.length + 1;
+  }
+
+  private patch(insn: number, target: number) {
+    this.code[insn - 1][2] = target;
+  }
+}

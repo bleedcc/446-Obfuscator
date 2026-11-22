@@ -1,0 +1,84 @@
+Prompt:
+You are an expert Lua/Luau obfuscation and anti-tamper engineer. I need you to redesign my obfuscator (Dailyfuscator) so it becomes a true 10/10 protection. Below is everything that must be addressed based on deep analysis of the current version.
+Current State & Weaknesses (Must Fix All of These)
+The current protector has these layers:
+Heavy Unicode armor (RLO, LRI, zero-width spaces, combining diacritics, Hangul fillers, Braille blanks, soft hyphens, private-use characters, etc.)
+Large constant table with encrypted values
+Custom 32-bit arithmetic (_ssalr XOR-style, y4srv3n multiply, wqmnx rotate, joq2i)
+ChaCha-style quarter round (nnrl83) + keystream generator (j4f)
+Authenticated decryption (lt3r / ndmbx) with checksums
+Custom VM with sections (vns, unti, lsrot), encrypted instructions, dispatcher table (vpl3nh), and integrity function (lnlc)
+Rolling state (st.fmjf) used in many handlers
+Critical weaknesses:
+Once the Unicode armor is stripped, the entire protector (crypto + VM interpreter + dispatcher) becomes readable plain Lua. This is the biggest problem.
+Integrity checks are mostly simple bounds/structure checks.
+Weak dynamic analysis resistance (easy to hook/debug/dump).
+Constant encryption is solid but still static and reversible with enough effort.
+No strong environment fingerprinting or delayed failure.
+Cleaned file still shows clear structure, function definitions, and recognizable patterns.
+Required New Architecture (Mandatory)
+Implement a real multi-stage design:
+Tiny Bootstrap Only (the only plain Lua that should survive cleaning)
+Extremely small and heavily obfuscated.
+Performs complex key derivation.
+Decrypts Stage-2 blob in memory.
+Reconstructs the real protector.
+Must use: control-flow flattening, opaque predicates, encrypted strings, derived constants, heavy junk/dead code.
+After cleaning, attacker should only see messy bootstrap + encrypted blob.
+Stage-2 (Encrypted – never plaintext in final file)
+Contains all real crypto primitives.
+Contains the full custom VM interpreter, dispatcher, and support functions.
+Rebuilds everything into memory (closures/upvalues).
+Transfers control to the real VM.
+Real VM + User Script
+Runs only after Stage-2 has fully rebuilt the interpreter.
+Keep or improve the existing bytecode VM design.
+Detailed Requirements (Do Not Skip Any)
+Unicode Armor – Maximum Strength
+Maintain very high density of bidirectional controls, zero-widths, combining marks, Hangul fillers, Braille blanks, soft hyphens, private-use area.
+Make density and character types non-uniform and context-dependent so simple global stripping is less effective.
+Include expensive-to-render sequences.
+Mix in sequences that survive some decoders but break naive cleaners.
+Bootstrap Hardening
+No clear readable function names or obvious control flow.
+All strings encrypted.
+Important constants derived at runtime.
+Heavy use of opaque predicates and junk code.
+Flattened control flow.
+Crypto Upgrades
+Runtime key derivation using multiple sources (section sizes, checksums, opaque predicate results, environment measurements, etc.).
+Add non-linear transforms (small S-box or extra ARX rounds).
+Different groups of constants should use different keys/methods.
+Keep the spirit of the existing arithmetic but make it stronger and less static.
+Integrity & Anti-Tamper
+Replace simple length checks with stronger integrity (rolling cryptographic checksums / HMAC-style verification of critical sections).
+Self-checksumming of important interpreter parts at runtime.
+Failed checks should preferably cause delayed, probabilistic, or corrupting failure instead of instant obvious abort.
+Dynamic Analysis Resistance (Highest Priority Gap)
+Timing checks against single-stepping.
+Periodic re-verification of critical code/behavior.
+Ability to decrypt VM parts only when needed and re-protect if possible.
+Environment fingerprinting.
+Delayed or conditional failure on detection.
+Roblox API Integration (Path2D and similar)
+Use Path2D and other Roblox Instance APIs for:
+Environment checks (existence + correct behavior of Path2D, DataModel-like environment, etc.).
+Decoy/junk code so the cleaned bootstrap looks more like messy UI-related code.
+Contribution to key derivation or integrity decisions.
+These are supporting layers only — not the main protection.
+Final Hard Goals
+Unicode armor still crashes weak tools.
+After aggressive cleaning (non-ASCII removal + comment stripping), only the tiny obfuscated bootstrap + encrypted blob remain visible.
+No readable _ssalr, j4f, nnrl83, dispatcher table, or interpreter loop in the cleaned output.
+Attacker must reverse bootstrap → decrypt Stage-2 → reverse the real VM.
+Strong against both static and dynamic attacks.
+Deliverables Required
+Full explanation of the new multi-stage architecture.
+Concrete bootstrap design and responsibilities.
+How Stage-2 is encrypted, stored, and reconstructed at runtime.
+Detailed key derivation approach.
+Exactly how Path2D / Roblox checks are integrated.
+List of specific anti-debug, anti-hook, and integrity techniques.
+What the ideal cleaned file should look like.
+Clear implementation priority order.
+Design everything so that simply removing the Unicode junk is no longer enough to expose the real protection. Be thorough and practical. Do not omit any of the points above.

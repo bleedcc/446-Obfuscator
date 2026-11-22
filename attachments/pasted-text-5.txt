@@ -1,0 +1,92 @@
+10. MANDATORY SELF-TESTING AND ITERATIVE DEOBFUSCATION LOOP
+
+You must test your own obfuscator as an adversarial reverse engineer. Do not stop after implementing the first round of improvements.
+
+Phase 1: Build
+
+- Generate a protected output from a known test program.
+- Verify that the output is valid and executable.
+- Confirm that the final file is at least 512,000 bytes.
+- Save the original source and protected output separately for comparison.
+
+Phase 2: Attack your own output
+
+Attempt to analyze the generated output using the same techniques an independent analyst or AI model would use.
+
+Test whether you can:
+
+- Extract readable strings and constants.
+- Recover the encoding or decoding formula.
+- Identify VM instructions and opcode mappings.
+- Reconstruct function boundaries and parameters.
+- Recover conditional branches, loops, and return paths.
+- Simplify the VM into equivalent Lua operations.
+- Recover general behavior across multiple inputs, rather than only the default result.
+- Distinguish real instructions from decoys.
+- Identify predictable patterns shared across multiple builds.
+
+Record every successful recovery, the method used, and the weakness that enabled it.
+
+Phase 3: Fix the weaknesses
+
+For every meaningful weakness discovered:
+
+1. Trace it to the actual source code.
+2. Implement a concrete improvement.
+3. Rebuild the obfuscator.
+4. Generate a new protected output.
+5. Repeat the same attack tests against the new output.
+6. Compare the results with the previous build.
+
+Do not claim an improvement merely because the output looks more complicated.
+
+Phase 4: Regression testing
+
+After each change, run the original and protected programs against the same test cases.
+
+Test different arguments and edge cases, including:
+
+- Empty and non-empty strings.
+- Conditional returns.
+- Different function inputs.
+- Nested branches and loops.
+- Closures and tables.
+- Multiple return values and varargs.
+- Supported Lua/Luau-specific features.
+
+Reject any change that breaks supported behavior or introduces unreliable execution.
+
+Phase 5: Repeat until diminishing returns
+
+Repeat the build, attack, fix, and regression-test cycle until:
+
+- No obvious, inexpensive reconstruction method remains undiscovered by the test suite.
+- Additional changes provide no meaningful improvement under the defined attack tests.
+- All supported regression tests pass.
+- The 512,000-byte minimum is satisfied.
+- Performance and compatibility remain acceptable.
+
+Set a reasonable iteration limit to prevent endless changes. If the limit is reached, report the remaining weaknesses instead of claiming the obfuscator is unbeatable.
+
+Phase 6: Final independent evaluation
+
+Evaluate the final version using fresh test programs and new build seeds that were not used during development.
+
+Report:
+
+- Initial reconstruction results.
+- Final reconstruction results.
+- Which weaknesses were fixed.
+- Which information remains recoverable.
+- Whether equivalent behavior can still be reconstructed.
+- Regression-test pass rate.
+- Exact output size in bytes.
+- Runtime overhead and compatibility limitations.
+
+Do not use only the same examples that guided your improvements. Include unseen test cases to reduce the risk of overfitting.
+
+Final rule
+
+Do not stop at the first successful build. The task is incomplete until you have repeatedly attempted to deobfuscate your own output, fixed the weaknesses you found, and verified that the final version remains correct.
+
+Be honest about the scope of testing. Passing these tests demonstrates resistance to the tested methods, not immunity to every possible reverse-engineering technique.

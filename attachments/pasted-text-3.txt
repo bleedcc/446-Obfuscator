@@ -1,0 +1,212 @@
+DAILYFUSCATOR V3: MAXIMUM RECONSTRUCTION-RESISTANCE ENGINEERING
+
+You are an expert Lua/Luau compiler engineer, virtual-machine architect, and reverse-engineering resistance specialist.
+
+Your task is to upgrade my existing Dailyfuscator V3 implementation. The primary objective is to make recovering the original source logic from its protected output substantially more difficult for AI models, automated deobfuscators, and static-analysis tools.
+
+This is an implementation task, not a brainstorming exercise. Inspect the existing project, identify its actual weaknesses, modify the real code, and return the complete updated project.
+
+1. PRIMARY OBJECTIVE: PREVENT EASY SOURCE RECONSTRUCTION
+
+Do not optimize merely for unreadable text. Optimize for resistance to recovering the original program's general logic.
+
+Assume an analyst has the complete protected output and can:
+
+- Read every byte of the generated file.
+- Run the output in an authorized test environment.
+- Perform static analysis.
+- Extract strings and constants.
+- Trace execution.
+- Write custom decoding scripts.
+- Use AI models to explain recovered VM instructions.
+- Compare multiple protected builds of the same source.
+
+Design the protection pipeline with these capabilities in mind.
+
+Do not claim that any client-side obfuscation makes reconstruction impossible. The goal is to eliminate trivial recovery paths and significantly increase the effort required for meaningful reconstruction.
+
+2. AUDIT THE CURRENT DAILYFUSCATOR
+
+Analyze the existing source code before making changes.
+
+Find and document:
+
+- The exact method used to encode instructions.
+- The mapping between encoded operations and VM behavior.
+- How constants and strings are stored.
+- How decoding functions can be isolated and reused.
+- Whether instruction order exposes the original control flow.
+- Whether branches reveal the original conditional structure.
+- Whether function boundaries and parameters remain identifiable.
+- Whether the protected entry point makes the entire program easy to simulate.
+- Whether decoy data can be distinguished from meaningful instructions.
+- Whether the current implementation can be devirtualized with a short script.
+
+Do not invent findings. Connect each finding to the actual implementation.
+
+3. REPLACE TRIVIAL BYTECODE PROTECTION
+
+Strengthen the bytecode architecture so the output does not provide an obvious, fixed translation from every instruction to its original Lua operation.
+
+Requirements:
+
+- Use a documented custom instruction representation.
+- Support per-build variation in eligible instruction encodings.
+- Avoid permanently predictable opcode assignments.
+- Make instruction boundaries and operand relationships less immediately obvious.
+- Preserve correct instruction decoding and execution.
+- Validate malformed or corrupted bytecode.
+- Keep the implementation deterministic when a reproducible seed is supplied.
+
+Do not simply XOR every byte with one constant or substitute opcode numbers using a fixed lookup table.
+
+4. MAKE CONTROL FLOW HARDER TO RECONSTRUCT
+
+Analyze the original compiler and VM to identify how branch conditions, jumps, loops, and return paths leak source structure.
+
+Implement semantics-preserving transformations where appropriate:
+
+- Control-flow restructuring.
+- Eligible control-flow flattening.
+- Alternative internal representations of conditional execution.
+- Safe instruction-layout variation.
+- Reduction of direct correspondence between source blocks and encoded instruction sequences.
+
+Preserve variable scopes, closures, execution order, side effects, and return behavior.
+
+Do not replace real logic with a hardcoded result. The protected program must behave correctly with different valid inputs.
+
+5. IMPROVE CONSTANT AND DATA-FLOW PROTECTION
+
+Make static extraction of the original program's constants less straightforward.
+
+Requirements:
+
+- Avoid one centralized table containing every original string in readable form.
+- Protect eligible string and numeric constants.
+- Reduce obvious links between encoded constants and their original locations.
+- Avoid exposing a single trivial decoding routine that reveals everything.
+- Preserve string escapes, Unicode, embedded control characters, and numeric semantics.
+- Ensure constant decoding does not change program behavior.
+
+Evaluate whether an analyst can reconstruct the constant pool without understanding the actual VM, and address the weaknesses found.
+
+6. CUSTOM VIRTUALIZATION
+
+Where the existing architecture supports it, strengthen the custom VM rather than merely wrapping the original source in an encoded string.
+
+The VM should have:
+
+- A clear internal instruction model.
+- Correct handling of supported functions and arguments.
+- Correct handling of conditional branches and loops.
+- Correct closure and lexical-scope behavior where supported.
+- Correct multiple-return and vararg behavior where supported.
+- A validated decoder and execution pipeline.
+- Explicitly documented unsupported language features.
+
+Analyze whether the interpreter can be reduced to a simple opcode-to-Lua-operation mapping. Reduce such direct correspondence where feasible without breaking correctness.
+
+7. POLYMORPHIC BUILDS
+
+Different builds of the same source should have meaningfully different internal representations.
+
+Vary eligible internal structures, instruction encodings, layouts, and equivalent control-flow forms.
+
+Requirements:
+
+- Keep the decoder compatible with its generated bytecode.
+- Avoid a single globally fixed internal format wherever practical.
+- Support reproducible builds through a specified seed.
+- Ensure that randomized builds pass the same behavioral tests.
+- Avoid cosmetic changes that only alter whitespace, identifiers, or filler.
+
+8. MANDATORY OUTPUT SIZE: 512,000 BYTES MINIMUM
+
+The final protected output must be at least 512,000 actual bytes for every successful build.
+
+This requirement is mandatory.
+
+- Measure the actual file size after writing the output.
+- Do not estimate the size from source characters.
+- Do not count external files, dependencies, or temporary artifacts.
+- Integrate size validation directly into the output pipeline.
+- Ensure size expansion never changes program behavior.
+- Do not report success if the generated file is below the threshold.
+- Report the exact final byte count.
+- Keep the output valid for the intended Lua/Luau runtime.
+
+The size requirement must coexist with meaningful protection improvements. A large file alone is not evidence of reconstruction resistance.
+
+9. TEST AGAINST ACTUAL RECONSTRUCTION ATTACKS
+
+Create a test suite that evaluates how easily the protected output can be analyzed.
+
+Include:
+
+- Direct string extraction.
+- Constant-pool recovery.
+- Opcode mapping.
+- Instruction-boundary identification.
+- Control-flow reconstruction.
+- VM simplification.
+- Function and branch recovery.
+- Repeated-build comparison.
+- Behavioral simulation with different inputs.
+
+For each test, document what was recovered, how it was recovered, and which weakness in the implementation enabled it.
+
+Use harmless test programs with known source and expected behavior.
+
+10. PRESERVE SEMANTICS
+
+Correctness is more important than cosmetic complexity.
+
+Test:
+
+- Empty and non-empty strings.
+- Conditional returns.
+- Nested branches.
+- Loops.
+- Tables and indexing.
+- Functions with different arguments.
+- Closures.
+- Multiple returns.
+- Varargs.
+- String escaping.
+- Numeric operations.
+- Runtime errors.
+
+Compare original and protected behavior across multiple inputs. Do not assume that matching one return value proves the original logic has been preserved.
+
+11. DELIVER COMPLETE UPDATED FILES
+
+Do not return only a prompt, a design proposal, or isolated snippets.
+
+Deliver:
+
+1. The complete modified Dailyfuscator project.
+2. All new VM and bytecode modules.
+3. The updated output generator.
+4. The mandatory 512,000-byte size validator.
+5. Automated behavioral tests.
+6. Reconstruction-resistance tests.
+7. Build and usage instructions.
+8. A report listing implemented protections, limitations, and remaining attack surfaces.
+
+Do not remove existing functionality without explaining why.
+
+12. FINAL ACCEPTANCE CRITERIA
+
+The project is complete only when:
+
+- The actual implementation has been modified.
+- The output meets the 512,000-byte minimum.
+- Supported programs preserve their behavior.
+- Multiple builds demonstrate meaningful internal variation.
+- The reconstruction tests have been run and their results reported.
+- Remaining weaknesses are documented honestly.
+
+Do not claim the system is impossible to reverse engineer. Demonstrate improvements through implementation and testing, not marketing language.
+
+Final priority: make the original program's general logic difficult to reconstruct from the protected artifact, rather than merely making the output large or visually complicated.

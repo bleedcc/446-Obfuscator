@@ -1,0 +1,696 @@
+DAILYFUSCATOR V4 ULTIMATE
+
+Full Three-Source Fusion, 500 KB Minimum Output, Adaptive Encoding, VM Protection, Decoy Structures, and Complete Rebuild
+
+ROLE
+
+Act as a senior Lua/Luau compiler engineer, VM developer, code transformation specialist, and software testing engineer.
+
+Rebuild my existing project, Dailyfuscator, into a complete V4 obfuscator.
+
+This must remain a continuation of my existing project. Do not replace it with an unrelated obfuscator, a demonstration-only script, or a collection of disconnected code snippets.
+
+I want the existing architecture, SnowVeil-inspired payload processing, and new V4 features combined into one maintainable project.
+
+Inspect every attached file before writing the implementation. Build actual source files, run available tests, fix errors, and package the finished project into a ZIP when supported.
+
+---
+
+1. REQUIRED REFERENCE FILES
+
+All three references are required. Do not ignore or substitute any of them.
+
+Reference A: Current Dailyfuscator
+
+Filename: "protected.lua (18).txt"
+
+Priority: highest.
+
+This is the current Dailyfuscator output and the primary baseline for the rebuild.
+
+Its visible architecture includes:
+
+- Register-based VM execution.
+- Instruction dispatch.
+- VM operations for arithmetic, tables, comparisons, calls, jumps, and returns.
+- Encoded strings and numeric constants.
+- Key-dependent byte decoding.
+- Checksum validation.
+- String and number caches.
+- Return-value packing.
+- Runtime integrity checks.
+
+Preserve recognizable features whose semantics can be verified.
+
+The file also contains missing or stubbed functionality, including global-access helpers and references to decoder functions that are not defined in the visible output. Do not pretend the missing original implementation has been recovered.
+
+Reference B: Older Dailyfuscator
+
+Filename: "loader.lua (10).txt"
+
+Use this as the secondary Dailyfuscator reference.
+
+Compare it against the current file to identify:
+
+- Shared VM design.
+- Constant-protection differences.
+- Decoder differences.
+- Runtime differences.
+- Instruction representation changes.
+- Features that can be verified in one output but not the other.
+
+Preserve compatible behavior and document differences.
+
+Reference C: SnowVeil
+
+Filename: "rwd42qt.txt"
+
+Use SnowVeil as an additional reference for its observable payload-processing architecture.
+
+Investigate:
+
+- Custom payload representation.
+- Character-group decoding.
+- Stateful byte transformations.
+- Compression or dictionary-based reconstruction.
+- Integrity checks.
+- Runtime assumptions.
+- Final payload reconstruction.
+
+Confirm each observation from the supplied file. Do not assume a custom transformation is cryptographically secure merely because it resembles a known algorithm.
+
+Mandatory audit
+
+Before implementation, create a migration report containing:
+
+Feature| Current Dailyfuscator| Older Dailyfuscator| SnowVeil| V4 decision
+VM| Verified findings| Verified findings| Applicable findings| Preserve/improve
+Constants| Verified findings| Verified findings| Applicable findings| Integrate
+Encoding| Verified findings| Verified findings| Verified findings| Integrate
+Compression| Verified findings| Verified findings| Verified findings| Implement/test
+Integrity| Verified findings| Verified findings| Verified findings| Improve
+Runtime| Verified findings| Verified findings| Verified findings| Validate
+Missing code| Actual gaps| Actual gaps| Actual gaps| Document
+
+Classify every identified feature as preserved, reimplemented, improved, or unresolved.
+
+Do not fabricate findings or claim exact recovery without evidence.
+
+---
+
+2. OUTPUT SIZE: MINIMUM 500 KB
+
+I want even a tiny input program to produce a generated output file of at least 500 KiB, where:
+
+"500 KiB = 512,000 bytes"
+
+Make this an explicit configurable build requirement.
+
+Required behavior
+
+- Default minimum output size: 512,000 bytes.
+- Apply the requirement to the final generated artifact, not the original source.
+- Measure the actual file size in bytes.
+- Include the final byte count in the build report.
+- Provide a configurable minimum-size option.
+- Fail the build with a clear diagnostic if the configured minimum cannot be satisfied.
+- Do not falsely report that the minimum has been reached.
+
+Size expansion system
+
+Implement a modular output-size expansion subsystem that works with the chosen payload format.
+
+It may use:
+
+- Valid payload representation.
+- Configurable data-segment layouts.
+- Structured, non-executable padding.
+- Versioned metadata records.
+- Optional inert data sections.
+- Valid generated decoder metadata.
+- Documented payload framing.
+
+Padding and inert data must remain separate from the executable program's semantics.
+
+Do not add thousands of fake function calls, infinite loops, dangerous runtime behavior, or random statements that change the program's behavior just to increase file size.
+
+The builder must verify that removing or changing optional padding cannot silently corrupt the real payload.
+
+Size profiles
+
+Provide configurable options:
+
+- "minimum_output_bytes"
+- "padding_strategy"
+- "maximum_padding_bytes"
+- "compression_enabled"
+- "size_validation_enabled"
+
+When the final output would otherwise be smaller than the configured minimum, expand the valid non-executable representation until the threshold is met.
+
+If a target format or runtime cannot support this safely, report the limitation instead of generating invalid code.
+
+Performance transparency
+
+A 500 KiB file is not inherently harder to reverse-engineer than a smaller file. Measure parsing time, build time, and runtime overhead, and document the costs of the minimum-size requirement.
+
+Do not claim that file size alone provides stronger protection.
+
+---
+
+3. ADAPTIVE MULTI-LAYER ENCODING ENGINE
+
+Implement AMLE: Adaptive Multi-Layer Encoding Engine.
+
+Create a registry of real, tested encoding and transformation implementations.
+
+Supported encoding categories
+
+Implement compatible options from these categories:
+
+- Binary.
+- Octal.
+- Decimal byte representation.
+- Hexadecimal.
+- Base32.
+- Base36.
+- Base58.
+- Base62.
+- Base64.
+- Base64url.
+- Base85 or Ascii85.
+- Base91.
+- Custom alphabets.
+- UTF-8 byte representations.
+- Byte arrays.
+- Unicode escapes.
+- Lua string escapes.
+- URL percent encoding where appropriate.
+- HTML entities where appropriate.
+- Reversible byte transformations.
+- XOR with a generated key.
+- Defined Caesar or ROT-style transformations.
+
+Do not claim that a custom codec conforms to a standard unless it actually does.
+
+Registry metadata
+
+Every stage must declare:
+
+- Input type.
+- Output type.
+- Reversibility.
+- Decoder implementation.
+- Input constraints.
+- Output constraints.
+- Approximate processing cost.
+- Supported runtime.
+- Compatibility with other stages.
+
+Reject invalid combinations before generating output.
+
+Adaptive pipeline
+
+Select compatible stages based on:
+
+- Input length.
+- Data characteristics.
+- Output size.
+- Runtime cost.
+- Selected profile.
+- Build seed.
+- Supported target environment.
+
+Use a bounded pipeline depth. Do not stack every encoding indiscriminately.
+
+Ensure that each pipeline has the correct reverse decoding sequence and that every encoded value can be recovered exactly.
+
+Variation
+
+Support:
+
+- Deterministic output with a supplied seed.
+- Varied builds with generated seeds.
+- Different valid encoding pipelines between builds.
+- Different supported constant representations.
+- Consistent decoder metadata.
+
+The same seed and configuration must produce reproducible output when deterministic mode is enabled.
+
+---
+
+4. PRESERVE AND IMPROVE THE EXISTING VM
+
+The current Dailyfuscator VM remains the primary architectural baseline.
+
+Implement a real, documented VM with verified semantics.
+
+Support the appropriate subset of:
+
+- Register moves.
+- Constant loading.
+- Nil and boolean loading.
+- Global access.
+- Table creation.
+- Table reads and writes.
+- Arithmetic.
+- Unary operators.
+- Concatenation.
+- Comparisons.
+- Conditional branches.
+- Jumps.
+- Function calls.
+- Return-value handling.
+
+Correctly handle:
+
+- Multiple return values.
+- Nil values in argument and result sequences.
+- Varargs where supported.
+- Function closures.
+- Lexical scoping.
+- Table semantics.
+- Lua truthiness.
+- Evaluation order.
+- Error propagation.
+
+Define the instruction format, register conventions, constant representation, jump rules, and call/return conventions.
+
+Do not claim full Lua or Luau compatibility until supported language features have passed regression tests.
+
+---
+
+5. CONSTANT PROTECTION
+
+Preserve the existing constant-protection architecture where verified.
+
+Implement:
+
+- Encoded strings.
+- Encoded numeric constants.
+- Key-dependent decoding where appropriate.
+- Correct handling of empty strings.
+- Correct handling of embedded zero bytes.
+- Validation of malformed records.
+- Optional lazy decoding.
+- Optional caching.
+- Cache limits.
+- Per-build variation.
+- Deterministic testing.
+- Correct negative-number and special-number handling where supported.
+
+Avoid changing constant values or program behavior.
+
+Do not treat an ordinary checksum as cryptographic authentication. Clearly document the distinction.
+
+---
+
+6. SNOWVEIL-INSPIRED PAYLOAD PROCESSING
+
+Create a modular payload pipeline informed by SnowVeil's observable architecture.
+
+Possible stages:
+
+1. Source validation.
+2. Parsing or compilation.
+3. Intermediate representation generation.
+4. Optional compression.
+5. Payload representation.
+6. Reversible transformations.
+7. Versioned metadata.
+8. Integrity validation.
+9. Decoder generation.
+10. Reconstruction in the intended execution environment.
+
+Make stages configurable.
+
+Implement actual compression or use a tested dependency. Do not invent compression results.
+
+Validate payload lengths, indices, decoder metadata, and decompression limits.
+
+Do not claim that this implementation is identical to SnowVeil. The goal is to integrate useful, verified architectural ideas into Dailyfuscator V4.
+
+---
+
+7. DECOY DATA AND STATIC-ANALYSIS RESISTANCE
+
+I want harmless decoy structures that make simplistic automated analysis less reliable, while keeping the real program correct.
+
+Implement a dedicated Decoy Metadata System.
+
+Allowed decoy features
+
+- Unused metadata records with valid schemas.
+- Decoy constant records clearly separated from live constants.
+- Alternative valid representations of the same non-executable metadata.
+- Inert payload sections.
+- Plausible but non-authoritative labels and identifiers.
+- Redundant descriptive metadata.
+- Optional decoy entries in non-executable tables.
+- Randomized layout of independent metadata records.
+- Documentation and tests distinguishing live data from decoys.
+
+Decoys must not execute, alter the host environment, or be confused with real dependencies.
+
+Strict correctness rules
+
+- Never let decoy constants accidentally replace real constants.
+- Never redirect genuine program execution into arbitrary decoy code.
+- Never introduce fake dependencies that cause the output to break.
+- Never rely on false security claims.
+- Never label a decoy as cryptographic protection.
+- Keep real and decoy data distinguishable to the implementation's own decoder.
+- Ensure that decoy generation is optional and testable.
+- Verify that enabling or disabling decoys does not change observable program results.
+
+Analysis evaluation
+
+Create a local test harness that measures whether basic static inspection can identify:
+
+- The actual payload boundary.
+- Real constant records.
+- The decoding sequence.
+- The VM entry point.
+- The metadata schema.
+
+Compare outputs with decoys disabled and enabled.
+
+Report the results honestly. Do not claim that decoys defeat all reverse engineering.
+
+Do not implement fake system APIs, credential traps, malicious executable decoys, destructive anti-analysis behavior, or mechanisms intended to compromise third-party AI agents or bots.
+
+---
+
+8. CONTROL-FLOW AND IDENTIFIER TRANSFORMS
+
+Implement semantics-preserving transformations.
+
+Identifier transformation
+
+- Rename eligible local identifiers.
+- Respect lexical scopes.
+- Prevent collisions.
+- Avoid reserved words.
+- Preserve required public names.
+- Handle nested functions and shadowing.
+- Avoid unsafe text-only replacement.
+
+Control-flow transformations
+
+- Validate control-flow graphs.
+- Preserve branch conditions.
+- Preserve loops and return paths.
+- Preserve evaluation order.
+- Avoid invalid jumps.
+- Make individual passes configurable.
+- Test transformed programs against their original outputs.
+
+Do not generate meaningless executable code merely to increase file size.
+
+Representation variation
+
+Where supported, vary:
+
+- Instruction representations.
+- Constant layouts.
+- Dispatch organization.
+- Encoding choices.
+- Payload framing.
+- Metadata order.
+
+Keep the internal compiler model stable and testable.
+
+---
+
+9. BUILD PROFILES
+
+Provide five profiles.
+
+Basic
+
+Conservative transformations, basic constant protection, low runtime overhead.
+
+Balanced
+
+Adaptive encoding, improved constants, moderate representation variation.
+
+Strong
+
+More validated transformations, optional compression, varied payload representation, and increased protection overhead.
+
+Maximum
+
+All validated transformations compatible with the target, bounded pipeline depth, and the strongest tested configuration.
+
+Custom
+
+Individual controls for every supported transformation.
+
+No profile may silently enable an untested feature.
+
+Each build report must list the enabled transformations, output size, selected profile, and any compatibility warnings.
+
+---
+
+10. LUA AND LUAU COMPATIBILITY
+
+Inspect the project to determine its intended language and runtime.
+
+Document the supported versions and syntax.
+
+Requirements:
+
+- Use a real parser or a thoroughly tested frontend.
+- Handle lexical scopes correctly.
+- Handle varargs and multiple returns correctly.
+- Avoid relying on unavailable libraries.
+- Explicitly handle runtime differences.
+- Preserve global access according to the selected target.
+- Report unsupported syntax clearly.
+- Avoid unsafe assumptions about floating-point behavior.
+- Do not use "loadstring" unless the selected runtime supports it and the design explicitly requires it.
+
+Do not promise compatibility with arbitrary scripts until the test suite supports that claim.
+
+---
+
+11. CONFIGURATION AND CLI
+
+Provide a usable command-line interface similar to:
+
+dailyfuscator build input.lua -o output.lua
+dailyfuscator build input.lua --profile balanced -o output.lua
+dailyfuscator build input.lua --profile strong --seed 12345 -o output.lua
+dailyfuscator build input.lua --min-output-bytes 512000 -o output.lua
+dailyfuscator check input.lua
+dailyfuscator test
+dailyfuscator profiles
+dailyfuscator inspect-config
+
+Adapt these commands to the chosen implementation language.
+
+Provide configuration options for:
+
+- Protection profile.
+- Minimum output size.
+- Maximum padding.
+- Encoding strategy.
+- Compression.
+- Build seed.
+- VM transformations.
+- Decoy metadata.
+- Performance limits.
+- Compatibility target.
+
+The project must not require manual edits to internal modules for normal configuration.
+
+---
+
+12. AUTOMATED TESTING
+
+Create genuine automated tests.
+
+Encoding tests
+
+Test every codec and every supported reversible pipeline.
+
+Include:
+
+- Empty inputs.
+- Single-byte inputs.
+- All byte values.
+- Unicode.
+- Embedded zero bytes.
+- Malformed payloads.
+- Invalid alphabets.
+- Deterministic seeds.
+- Pipeline compatibility.
+- Correct reverse decoding order.
+
+VM tests
+
+Test every supported instruction and combinations of instructions.
+
+Include:
+
+- Arithmetic.
+- Tables.
+- Comparisons.
+- Branches.
+- Loops.
+- Functions.
+- Closures.
+- Varargs.
+- Multiple returns.
+- Nil values.
+- Errors.
+- Supported language-specific behavior.
+
+Decoy tests
+
+Verify that:
+
+- Decoys do not execute.
+- Real constants remain intact.
+- The decoder selects the correct live payload.
+- Decoys do not change program behavior.
+- Enabling and disabling decoys preserves results.
+
+Size tests
+
+Verify that:
+
+- Tiny inputs reach the configured 512,000-byte minimum.
+- Larger inputs are not unnecessarily truncated.
+- The measured file size is accurate.
+- Padding cannot corrupt the payload.
+- The size limit is respected.
+- The builder reports failure when the target cannot be satisfied safely.
+
+Regression tests
+
+Compare original and transformed programs in the same test environment.
+
+Compare return values, printed output, table contents, errors, and other observable behavior relevant to each test.
+
+Performance tests
+
+Measure build time, output size, runtime overhead, memory usage where practical, and compression ratio.
+
+Do not invent test results or benchmark values.
+
+---
+
+13. PROJECT STRUCTURE
+
+Create a modular project resembling:
+
+DailyfuscatorV4/
+├── src/
+│   ├── cli/
+│   ├── frontend/
+│   ├── parser/
+│   ├── analysis/
+│   ├── transforms/
+│   ├── encoding/
+│   ├── compression/
+│   ├── vm/
+│   ├── payload/
+│   ├── decoys/
+│   ├── integrity/
+│   ├── profiles/
+│   └── utils/
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   ├── regression/
+│   └── fixtures/
+├── examples/
+├── docs/
+├── README.md
+├── CHANGELOG.md
+└── configuration file
+
+Adapt this structure as needed. Do not create empty placeholder modules and label them complete.
+
+---
+
+14. REQUIRED DELIVERABLES
+
+Deliver actual files:
+
+1. Complete Dailyfuscator V4 source project.
+2. All required modules.
+3. CLI and configuration examples.
+4. AMLE encoding registry and pipeline.
+5. VM compiler and interpreter for the supported subset.
+6. Constant-protection modules.
+7. Payload-processing pipeline.
+8. Compression support.
+9. Decoy metadata system.
+10. Protection profiles.
+11. Automated tests.
+12. Example input programs.
+13. README and installation instructions.
+14. Migration report covering all three reference files.
+15. Actual test results.
+16. Actual performance results where benchmarks can run.
+17. ZIP archive of the completed project, if file generation is available.
+
+If the complete project cannot be built in one pass, deliver a working end-to-end implementation first and continue in explicit phases. Never substitute a long explanation for the requested source files.
+
+---
+
+15. IMPLEMENTATION ORDER
+
+Follow this exact order:
+
+Phase 1: Inspect all three reference files.
+
+Phase 2: Produce the audit and migration report.
+
+Phase 3: Establish language compatibility and the test harness.
+
+Phase 4: Implement the supported Dailyfuscator VM and constant protection.
+
+Phase 5: Implement AMLE and its codec tests.
+
+Phase 6: Implement the payload pipeline and compression.
+
+Phase 7: Implement validated transformations and representation variation.
+
+Phase 8: Implement decoy metadata and verify semantic equivalence.
+
+Phase 9: Implement the configurable minimum output size of 512,000 bytes.
+
+Phase 10: Implement profiles, CLI, and configuration.
+
+Phase 11: Run regression, correctness, size, and performance tests.
+
+Phase 12: Fix failures, document limitations, and package the project.
+
+Do not skip earlier phases just to create a large-looking output.
+
+---
+
+FINAL ACCEPTANCE CRITERIA
+
+Dailyfuscator V4 is only complete when:
+
+- All three reference files have been inspected.
+- The current Dailyfuscator remains the primary architectural baseline.
+- The older output is used as a secondary reference.
+- SnowVeil is used as an additional reference, not a replacement.
+- Missing source functionality is documented honestly.
+- The supported VM passes its tests.
+- Every implemented codec passes round-trip tests.
+- Decoy metadata does not alter program behavior.
+- Small input programs can produce outputs of at least 512,000 bytes using the configured safe representation and padding system.
+- The output-size requirement is verified using actual bytes.
+- Build variation works as documented.
+- The CLI runs.
+- The regression suite passes.
+- The README describes the real implementation rather than planned features.
+- The project source and ZIP are delivered when supported.
+
+Start now by auditing the actual three attached files. Then implement Dailyfuscator V4. Do not stop at planning, do not invent recovered logic, and do not claim untested features work.

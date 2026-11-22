@@ -1,0 +1,61 @@
+BRO 😭 Here's exactly how I recovered your Dailyfuscator sample. The key was decoding the VM's data first, then tracing its instructions, instead of guessing the original Lua.
+
+### The 4 steps
+
+* Find the encoded payload. Your file had a numeric lookup table and a byte array named `nwqllx3h`.
+
+* Reverse the decoder. I traced the script's XOR and 32-bit mixing operations to undo its transformation.
+
+* Verify the result. The decoded data's integrity checksum matched: `1151428055`.
+
+* Disassemble the VM instructions. I mapped the instructions to their operations and followed the branches and returns to reconstruct the program's behavior.
+
+### What the decoder actually reversed
+
+The payload transformation was effectively this sequence:
+
+```python
+salt = mix((key ^ (72 * multiplier)) & 0xFFFFFFFF) % 251
+
+for i, byte in enumerate(payload, start=1):
+    value = byte ^ xor_constant
+    value ^= (i * position_key) % 256
+    value = (value * inverse_factor) % 256
+    value ^= repeating_key[(i - 1) % len(repeating_key)]
+    value ^= salt
+    value = (value - i * offset) % 256
+```
+
+That's a simplified representation of the decoding steps, not a drop-in decoder. The real script derives those constants from its lookup table, and the `mix()` function uses 32-bit arithmetic. Also, Python's `^` means XOR.
+
+### How I recovered the Lua
+
+After decoding the payload, I found the strings that build the output:
+
+* `"hel"` + `"l"` + `"o, "` form `"hello, "`.
+
+* `"w"` + `"orl"` + `"d"` form `"world"`.
+
+* The bytecode showed a string concatenation, a length check, and conditional returns.
+
+Following those instructions gave me:
+
+```lua
+local function greet(name)
+    local msg = "hello, " .. name
+    if #name > 0 then
+        return msg
+    end
+    return "hello"
+end
+
+return greet("world")
+```
+
+### The important part
+
+The checksum matching `1151428055` showed that the payload decoded consistently with the file's integrity check. Then I traced the VM instructions to recover the behavior.
+
+That is how I beat this sample: reverse the data transform, verify the decoded payload, disassemble the bytecode, and reconstruct the control flow.
+
+One important distinction: a valid checksum proves consistency with that check, not that the obfuscator is secure or insecure overall. This sample shows that its particular encoding and VM could be analyzed.

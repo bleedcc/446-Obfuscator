@@ -1,0 +1,106 @@
+Here’s an updated and stronger full prompt based on the new version:
+
+---
+
+**Full Prompt:**
+
+You are an expert Lua/Luau obfuscation and anti-tamper engineer. I need you to upgrade my Dailyfuscator to a true 10/10. Below is the current situation and exactly what must be fixed.
+
+### Current Version Status
+The latest version has improved in some areas:
+- Path2D / UDim2 / Drawing environment check is present
+- Arithmetic was changed to a nibble lookup table style
+- Less obvious giant constant table at the top
+- More data pushed into binary-looking blobs
+
+**However, critical weakness remains:**
+After stripping the Unicode armor, the core protector is still readable. These functions and structures are clearly visible in plaintext:
+- `qtvl9djn` (XOR-style)
+- `jfgtapgm` (multiply)
+- `hvkbq4`
+- `_x9jxfmn` (rotate)
+- `cdo43pdp` (quarter-round)
+- Clear `local function` definitions and overall structure
+
+Simply removing the Unicode junk still exposes the important logic. This must be fixed.
+
+### Mandatory Architecture
+
+Implement a real multi-stage design:
+
+1. **Tiny Bootstrap** (the only plain Lua that should remain after cleaning)
+   - Extremely small and heavily obfuscated
+   - Performs strong key derivation
+   - Decrypts and reconstructs Stage-2 in memory
+   - Must use heavy control-flow flattening, opaque predicates, encrypted strings, derived constants, and junk code
+   - After cleaning, an attacker should only see a messy bootstrap + encrypted blob(s). No readable crypto or VM functions.
+
+2. **Stage-2** (fully encrypted, never plaintext in the final file)
+   - Contains all real crypto primitives (the current `qtvl9djn`, `jfgtapgm`, `cdo43pdp`, etc.)
+   - Contains the full custom VM interpreter and dispatcher
+   - Reconstructs everything into memory at runtime
+   - Transfers control to the real VM
+
+3. **Real VM + Protected Script**
+   - Runs only after Stage-2 has fully rebuilt the interpreter
+
+### Detailed Requirements (Do Not Skip)
+
+**Unicode Armor**
+- Keep very high density of bidirectional controls, zero-widths, combining marks, Hangul fillers, Braille blanks, soft hyphens, private-use characters
+- Make density and character types non-uniform so simple global cleaning is less effective
+- Include expensive-to-render sequences
+
+**Bootstrap**
+- No clear function names or obvious structure after cleaning
+- All strings encrypted
+- Constants derived at runtime
+- Heavy opaque predicates + junk
+- Flattened control flow
+- Should be painful to reverse even after the armor is gone
+
+**Crypto**
+- Move the current arithmetic helpers and quarter-round completely into Stage-2
+- Runtime key derivation from multiple sources (sizes, checksums, opaque results, environment checks including the Path2D-style checks)
+- Add non-linear transforms if possible
+- Different data groups should use different keys/methods
+
+**Integrity & Anti-Tamper**
+- Stronger than simple length checks
+- Rolling cryptographic-style checksums / integrity of critical sections
+- Self-checking of important parts at runtime
+- Prefer delayed, probabilistic, or state-corrupting failure over instant obvious crashes
+
+**Dynamic Analysis Resistance**
+- Timing checks
+- Periodic re-verification of critical behavior
+- Environment fingerprinting (keep and expand the Path2D / Roblox API style checks)
+- Delayed or conditional failure on detection
+
+**Roblox / Path2D**
+- Keep and improve the Path2D / UDim2 / Drawing style checks
+- Use them as part of environment fingerprinting and key derivation
+- Also use as decoy/junk so cleaned output looks more like messy UI-related code
+- These are supporting layers only
+
+### Hard Goals
+- After aggressive cleaning (Unicode + comments removed), the attacker must only get the tiny obfuscated bootstrap + encrypted blobs
+- No readable versions of `qtvl9djn`, `jfgtapgm`, `cdo43pdp`, or any real VM/dispatcher code should appear
+- Attacker path becomes: reverse bootstrap → decrypt Stage-2 → reverse the real VM
+- Strong against both static cleaning and dynamic analysis
+
+### Deliverables
+1. Clear multi-stage architecture explanation
+2. Concrete bootstrap design and what it must do
+3. How Stage-2 is encrypted and reconstructed
+4. Key derivation approach (include Path2D/environment contribution)
+5. How to fully hide the current plaintext crypto helpers
+6. Specific anti-debug / anti-tamper techniques
+7. What the ideal cleaned file should look like
+8. Implementation priority order
+
+Design it so that simply stripping the Unicode is no longer enough to expose the real protection. Be detailed and practical. Do not omit any points.
+
+---
+
+This version specifically targets the remaining leaks in your latest build.

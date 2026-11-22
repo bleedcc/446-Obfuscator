@@ -1,0 +1,66 @@
+Here’s a focused prompt specifically for hardening the current bootstrap:
+
+---
+
+**Prompt:**
+
+You are an expert Lua/Luau obfuscation engineer. I have already moved almost all of the real protection into encrypted Stage-2 blobs. The remaining weak point is the **bootstrap** that is still relatively readable after Unicode stripping.
+
+Current bootstrap behavior (after cleaning):
+- Checks `Path2D`, `UDim2`, `Drawing` and builds a small environment score
+- Derives a key using that score + constants
+- Concatenates a large table of binary blobs
+- Decrypts the blob with a simple stream
+- Performs a light `os.clock` timing/integrity check
+- Uses `load`/`loadstring` on the result and runs it
+- Uses a small state machine variable (`_dlwnbm`)
+
+**Goal:** Make this bootstrap significantly harder to reverse even after the Unicode armor is completely removed, without changing the overall multi-stage architecture.
+
+### Requirements
+
+1. **Control Flow**
+   - Heavily flatten the bootstrap.
+   - Remove the obvious sequential state machine if possible, or make it much more opaque.
+   - Add opaque predicates and dead paths that look real.
+
+2. **Key Derivation**
+   - Make the key derivation more complex and less linear.
+   - Keep using the Path2D / UDim2 / Drawing checks as part of the key.
+   - Mix in more values (sizes, simple checksums, derived constants, etc.).
+   - Avoid obvious constants sitting next to the decryption loop.
+
+3. **Decryption Path**
+   - Make the real decryption path harder to identify quickly.
+   - Add plausible decoy decryption / transformation paths.
+   - Avoid a clean, easy-to-spot `load(decrypted)` pattern.
+
+4. **Integrity & Failure Behavior**
+   - Strengthen the integrity check beyond the current light timing check.
+   - Prefer delayed, probabilistic, or state-corrupting failure instead of a clean immediate error.
+   - Make failed checks harder to nop out cleanly.
+
+5. **Readability After Cleaning**
+   - After aggressive Unicode + comment stripping, the bootstrap should look messy and painful.
+   - Minimize clear variable names and obvious structure.
+   - Encrypt or derive important strings (including `"load"`, `"loadstring"`, `"string"`, `"byte"`, etc. where possible).
+
+6. **Keep Compatibility**
+   - Must still work in normal Roblox / Luau environments.
+   - Keep the Path2D-style environment contribution.
+   - Do not break the existing Stage-2 decryption + execution flow.
+
+### Deliverables
+- Concrete redesign of the bootstrap
+- How to flatten and obscure the control flow
+- Improved key derivation approach
+- How to hide the real decryption + load path
+- Better integrity / failure strategy
+- What the cleaned bootstrap should ideally look like afterward
+- Priority order for implementing these changes
+
+Focus only on hardening the bootstrap. The Stage-2 content is already encrypted and does not need to be redesigned in this prompt.
+
+---
+
+You can use this directly.
