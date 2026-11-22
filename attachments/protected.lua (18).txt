@@ -1,0 +1,214 @@
+-- Protected by Dailyfuscator. The transformed source is not the original program.
+local zs9hdd, _nccw, leclss1, __DF_KSUM, __DF_CRASH
+local __DF_CHK = 1075027448
+do
+  local _char = string.char
+  local _byte = string.byte
+  local _concat = table.concat
+  local _tonumber = tonumber
+  local _error = error
+  local _type = type
+  local _select = select
+  local _unpack = unpack or table.unpack
+  local _bk = {97,94,17,91,175,126,75,49,187,148,233,173,195,245,191,44}
+  local _ss = {{2,122443841,216,0,189,191},{3,3155155185,125,0,93,97,25},{7,3999755033,81,0,39,46,245,76,176,73,23},{5,299812109,139,0,97,104,47,134,234}}
+  local _nn = {{1,296008704,154,0,57},{1,296008703,44,0,202}}
+  local _scache = {}
+  local _ncache = {}
+  local function _sum(bytes)
+    local h = 2166136261
+    for i = 1, #bytes do
+      h = (h * 131 + bytes[i]) % 4294967296
+    end
+    return h
+  end
+  local function _acc(list)
+    local h = 2166136261
+    for i = 1, #list do
+      local b = list[i]
+      for j = 1, #b do
+        h = (h * 131 + b[j]) % 4294967296
+      end
+    end
+    return h
+  end
+  local _got = (2166136261 * 131 + _acc(_ss)) % 4294967296
+  _got = (_got * 131 + _acc(_nn)) % 4294967296
+  if _got ~= __DF_CHK then _error(" ", 0) end
+  local function _raw(blob, key)
+    if _type(blob) ~= "table" then _error(" ", 0) end
+    local n = blob[1]
+    local expect = blob[2]
+    local salt = blob[3]
+    local keyed = blob[4]
+    if keyed == 1 then
+      if _type(key) ~= "string" then _error(" ", 0) end
+    else
+      key = ""
+    end
+    local kl = #key
+    local bl = #_bk
+    local bytes = {}
+    for i = 1, n do
+      local e = blob[i + 4]
+      local kb = 0
+      if kl > 0 then kb = _byte(key, ((i - 1) % kl) + 1) end
+      local bb = _bk[((i - 1) % bl) + 1]
+      bytes[i] = (e - kb - bb - salt - i * 13) % 256
+    end
+    if _sum(bytes) ~= expect then _error(" ", 0) end
+    return bytes
+  end
+  local function _chars(bytes)
+    local t = {}
+    for i = 1, #bytes do t[i] = _char(bytes[i]) end
+    return _concat(t)
+  end
+  local function _ck(i, key)
+    if _type(key) ~= "string" then key = "" end
+    return tostring(i) .. "\0" .. key
+  end
+  zs9hdd = function(i, key)
+    local ck = _ck(i, key)
+    local hit = _scache[ck]
+    if hit ~= nil then return hit end
+    local s = _chars(_raw(_ss[i], key))
+    _scache[ck] = s
+    return s
+  end
+  _nccw = function(i, key)
+    local ck = _ck(i, key)
+    local hit = _ncache[ck]
+    if hit ~= nil then return hit end
+    local s = _chars(_raw(_nn[i], key))
+    local v
+    if s == "-0" then v = -0 else v = _tonumber(s) end
+    if v == nil then _error(" ", 0) end
+    _ncache[ck] = v
+    return v
+  end
+  __DF_KSUM = function(s)
+    if _type(s) ~= "string" then return -1 end
+    local h = 2166136261
+    for i = 1, #s do
+      h = (h * 131 + _byte(s, i)) % 4294967296
+    end
+    return h
+  end
+  __DF_CRASH = function()
+    _error(" ", 0)
+  end
+  local function __DF_GETG(n) return nil end
+  local function __DF_SETG(n, v) end
+  local OP_MOVE = 0
+  local OP_LOADK = 1
+  local OP_LOADNIL = 20
+  local OP_LOADBOOL = 7
+  local OP_GETG = 17
+  local OP_SETG = 12
+  local OP_GETT = 6
+  local OP_SETT = 2
+  local OP_NEWT = 23
+  local OP_ADD = 11
+  local OP_SUB = 3
+  local OP_MUL = 15
+  local OP_DIV = 14
+  local OP_MOD = 19
+  local OP_POW = 4
+  local OP_UNM = 10
+  local OP_NOT = 25
+  local OP_LEN = 24
+  local OP_CONCAT = 5
+  local OP_LT = 16
+  local OP_LE = 8
+  local OP_EQ = 22
+  local OP_TEST = 18
+  local OP_JMP = 21
+  local OP_CALL = 9
+  local OP_RETURN = 13
+  local _P = {{n=1,m=12,k={{1,3},{2,2},{1,4}},c={{1,2,1,0,49644},{0,4,2,0,19991},{0,5,1,0,86332},{5,3,4,5,21315},{0,6,3,0,84351},{24,7,1,0,16997},{1,8,2,0,22759},{16,9,8,7,25363},{18,9,0,1,83681},{21,0,14,0,71656},{0,10,6,0,33230},{13,10,1,0,79947},{21,0,14,0,94305},{1,11,3,0,49119},{0,12,11,0,21198},{13,12,1,0,11147},{13,0,0,0,53242}}}}
+  local function _konst(P, i, key)
+    local spec = P.k[i]
+    local tag = spec[1]
+    if tag == 1 then return zs9hdd(spec[2], key) end
+    if tag == 2 then return _nccw(spec[2], key) end
+    if tag == 3 then return spec[2] == 1 end
+    return nil
+  end
+  local function _pack(...)
+    return { n = _select("#", ...), ... }
+  end
+  leclss1 = function(pi, key, ...)
+    local P = _P[pi]
+    if _type(P) ~= "table" then _error(" ", 0) end
+    local R = {}
+    local args = {...}
+    for i = 1, P.n do R[i] = args[i] end
+    local top = P.n
+    local pc = 1
+    local code = P.c
+    while true do
+      local ins = code[pc]
+      if ins == nil then _error(" ", 0) end
+      local op, a, b, c = ins[1], ins[2], ins[3], ins[4]
+      pc = pc + 1
+      if op == OP_MOVE then R[a] = R[b]
+      elseif op == OP_LOADK then R[a] = _konst(P, b, key)
+      elseif op == OP_LOADNIL then R[a] = nil
+      elseif op == OP_LOADBOOL then R[a] = b == 1
+      elseif op == OP_GETG then
+        local spec = P.k[b]
+        R[a] = __DF_GETG(zs9hdd(spec[2], key))
+      elseif op == OP_SETG then
+        local spec = P.k[b]
+        __DF_SETG(zs9hdd(spec[2], key), R[a])
+      elseif op == OP_GETT then R[a] = R[b][R[c]]
+      elseif op == OP_SETT then R[a][R[b]] = R[c]
+      elseif op == OP_NEWT then R[a] = {}
+      elseif op == OP_ADD then R[a] = R[b] + R[c]
+      elseif op == OP_SUB then R[a] = R[b] - R[c]
+      elseif op == OP_MUL then R[a] = R[b] * R[c]
+      elseif op == OP_DIV then R[a] = R[b] / R[c]
+      elseif op == OP_MOD then R[a] = R[b] % R[c]
+      elseif op == OP_POW then R[a] = R[b] ^ R[c]
+      elseif op == OP_UNM then R[a] = -R[b]
+      elseif op == OP_NOT then R[a] = not R[b]
+      elseif op == OP_LEN then R[a] = #R[b]
+      elseif op == OP_CONCAT then
+        local v = R[b]
+        for i = b + 1, c do v = v .. R[i] end
+        R[a] = v
+      elseif op == OP_LT then R[a] = R[b] < R[c]
+      elseif op == OP_LE then R[a] = R[b] <= R[c]
+      elseif op == OP_EQ then R[a] = R[b] == R[c]
+      elseif op == OP_TEST then
+        local tv = not not R[a]
+        if tv == (c == 1) then pc = pc + 1 end
+      elseif op == OP_JMP then pc = b
+      elseif op == OP_CALL then
+        local fn = R[a]
+        local pargs = {}
+        for i = 1, b do pargs[i] = R[a + i] end
+        local pk = _pack(fn(_unpack(pargs, 1, b)))
+        if c < 0 then
+          for i = 1, pk.n do R[a + i - 1] = pk[i] end
+          top = a + pk.n - 1
+        elseif c > 0 then
+          for i = 1, c do R[a + i - 1] = pk[i] end
+        end
+      elseif op == OP_RETURN then
+        if b == 0 then return end
+        if b < 0 then return _unpack(R, a, top) end
+        return _unpack(R, a, a + b - 1)
+      else
+        _error(" ", 0)
+      end
+    end
+  end
+end
+
+local clsc = true
+local function aoeaaral(cx6kxux)
+  return leclss1(__DF_DN(1), nil, cx6kxux)
+end
+return aoeaaral(__DF_DS(1) .. __DF_DS(2))

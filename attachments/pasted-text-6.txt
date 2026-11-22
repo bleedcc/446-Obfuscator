@@ -1,0 +1,132 @@
+Dailyfuscator V3: Reverse-Engineering Resistance Audit & Hardening
+
+You are a senior Lua/Luau compiler engineer, VM designer, and defensive software security researcher. Your task is to audit and improve my existing Dailyfuscator V3 project using the actual source code and the latest protected sample, "protected.lua (23).txt".
+
+PRIMARY OBJECTIVE
+
+Determine exactly how the protected sample was analyzed and reconstructed, identify the specific weaknesses that enabled it, and fix those weaknesses in the actual obfuscator implementation.
+
+Do not merely make the output larger, rename variables, add comments, insert meaningless code, or claim the program is secure because it still executes.
+
+PHASE 1: REPRODUCE THE ATTACK
+
+Analyze the protected sample and the corresponding obfuscator source code.
+
+Investigate:
+
+- Whether encoded constants can be recovered without running the protected entry point.
+- Whether the VM instruction handlers expose their opcode meanings.
+- Whether the bytecode, control flow, register usage, or function boundaries can be reconstructed.
+- Whether decoder functions can be isolated and called independently.
+- Whether the constant table reveals its structure through predictable keys, layouts, or types.
+- Whether dead code, fake instructions, or decoy data can be distinguished from real execution logic.
+- Whether the wrapper exposes enough information to rebuild the original program's behavior.
+- Whether the output depends on deterministic keys, fixed seeds, or predictable transformations.
+
+For each weakness, provide:
+
+1. The exact file and function responsible.
+2. Evidence from the actual implementation.
+3. A reproducible test.
+4. The likely impact.
+5. A specific fix.
+
+Clearly separate verified findings from hypotheses. Never claim a test passed unless you actually ran it.
+
+PHASE 2: HARDEN THE IMPLEMENTATION
+
+Modify the existing project rather than creating a disconnected demo.
+
+Prioritize:
+
+- Stronger constant encoding and separation of sensitive data.
+- Better resistance to static recovery of bytecode and control flow.
+- Per-build variation in encoding, instruction mappings, and layouts.
+- Correctly implemented transformations that preserve program semantics.
+- Reduced exposure of reusable decoder and VM internals where practical.
+- Integrity checks that detect unexpected modification without breaking normal execution.
+- Removal of predictable patterns that make automated analysis unnecessarily easy.
+- Protection against accidental disclosure of original source, debug metadata, and temporary build artifacts.
+
+Use real cryptographic primitives only where appropriate. Do not invent custom cryptography or claim that encryption alone prevents recovery when the program must eventually decode data at runtime.
+
+Do not rely on fake instructions, massive padding, infinite loops, anti-debugging tricks, or code that breaks legitimate environments as substitutes for meaningful protection.
+
+PHASE 3: SEMANTIC CORRECTNESS
+
+Every transformation must preserve the original program's behavior within the supported Lua/Luau environment.
+
+Test:
+
+- Empty strings and non-empty strings.
+- Conditional branches and early returns.
+- Nested functions and closures.
+- Local variables and variable scope.
+- Multiple return values.
+- Nil, booleans, numbers, and strings.
+- Tables, metatables, and iteration.
+- Errors and edge cases.
+- Repeated builds with different seeds.
+
+Respect the target runtime. Do not silently substitute standard Lua behavior for incompatible Luau behavior.
+
+If a feature cannot be transformed safely, detect it and report a clear limitation instead of generating broken output.
+
+PHASE 4: AUTOMATED ATTACK BENCHMARK
+
+Create an automated test suite that attempts to recover program structure from protected samples without invoking their normal entry points.
+
+Measure whether the tests can recover:
+
+- Plaintext constants.
+- Opcode mappings.
+- Instruction sequences.
+- Function boundaries.
+- Branch structure.
+- Approximate source-level pseudocode.
+- Equivalent behavior on test inputs.
+
+Use both simple samples and more complex programs. Include the original greeting sample as a baseline, but do not optimize exclusively for that example.
+
+For each test, report:
+
+- Whether recovery succeeded.
+- What was recovered.
+- The method used.
+- Which defensive change improved or failed to improve the result.
+- Whether the protected program still behaves correctly.
+
+Use repeatable experiments and retain regression tests so future changes cannot silently reintroduce weaknesses.
+
+PHASE 5: ITERATIVE IMPROVEMENT
+
+Run this cycle:
+
+1. Build the protected sample.
+2. Attempt static analysis.
+3. Identify a concrete weakness.
+4. Implement a targeted fix.
+5. Rebuild the sample.
+6. Repeat the attack.
+7. Run semantic regression tests.
+8. Compare results against the previous version.
+
+Continue until the remaining improvements show diminishing returns, a real technical limitation, or a clearly documented trade-off.
+
+Do not fake attack results or use output size as the security score.
+
+OUTPUT REQUIREMENTS
+
+Deliver:
+
+- The complete updated Dailyfuscator V3 source project.
+- Every modified file in full.
+- A clear summary of the root causes discovered.
+- Before-and-after benchmark results.
+- Reproducible commands for building and testing.
+- A list of remaining limitations.
+- A working sample protected by the updated implementation.
+
+Minimum protected output size: 512,000 bytes when configured for the size requirement. Treat this as a compatibility/build requirement only, not evidence of stronger security. Avoid wasteful padding where possible.
+
+Do not stop after writing a plan. Inspect the actual project, implement the changes, run the tests, fix discovered failures, and provide the completed files. If essential project files are missing, identify exactly which files are needed instead of inventing their contents.

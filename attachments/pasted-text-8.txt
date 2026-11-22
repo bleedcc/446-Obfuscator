@@ -1,0 +1,266 @@
+Dailyfuscator v3.0 - Advanced VM Architecture Upgrade
+
+You are an expert Lua/Luau compiler engineer.
+
+Upgrade my existing Dailyfuscator project using the architectural concepts found in the uploaded SnowVeil v2.0 sample.
+
+Do not copy SnowVeil's source code, branding, or implementation. Independently build a reliable, original architecture for Dailyfuscator.
+
+The objective is a production-quality obfuscator with a custom binary payload format, advanced virtual machine, bytecode validation, constant protection, and reliable Roblox/Luau runtime compatibility.
+
+PHASE 1: Analyze the existing project
+
+Before editing:
+
+1. Inspect the entire Dailyfuscator codebase.
+2. Identify the compiler, encoder, decoder, runtime and interface.
+3. Identify all existing VM instructions.
+4. Find incomplete or broken functionality.
+5. Identify compatibility problems.
+6. Create an implementation plan based on the existing architecture.
+
+Do not replace working functionality unnecessarily.
+
+PHASE 2: Custom binary payload format
+
+Create a new versioned payload format.
+
+Requirements:
+
+- Unique magic header.
+- Explicit format version.
+- Structured sections.
+- Function prototype records.
+- Constant pool records.
+- Bytecode instruction sections.
+- Capture and upvalue metadata.
+- Length-prefixed binary data.
+- Bounded integer and string readers.
+- Strict validation of offsets and lengths.
+- Rejection of malformed payloads.
+- Optional chunked decompression.
+- Bounded decoded-data caching.
+
+The decoder must validate all data before execution.
+
+Do not use Base85 or Base64 as a replacement for encryption.
+
+PHASE 3: Advanced virtual machine
+
+Implement a proper register-based virtual machine.
+
+Every function prototype should contain:
+
+- Parameter count.
+- Maximum register count.
+- Entry instruction.
+- Constant count.
+- Instruction boundaries.
+- Capture metadata.
+- Upvalue metadata.
+- Vararg information.
+- Execution flags.
+
+Implement proper handling for:
+
+- MOVE
+- LOADK
+- GETGLOBAL
+- SETGLOBAL
+- GETTABLE
+- SETTABLE
+- NEWTABLE
+- ADD
+- SUB
+- MUL
+- DIV
+- MOD
+- POW
+- EQ
+- LT
+- LE
+- JMP
+- Conditional jumps
+- CALL
+- RETURN
+- CLOSURE
+- GETUPVAL
+- SETUPVAL
+- VARARG
+- CONCAT
+- LEN
+- NOT
+- Unary minus
+
+Add any additional instructions required for complete Luau compatibility.
+
+PHASE 4: Closures and execution state
+
+Implement proper:
+
+- Mutable closure cells.
+- Captured local variables.
+- Nested functions.
+- Recursive functions.
+- Multiple return values.
+- Variable arguments.
+- Correct register lifetimes.
+- Call-frame management.
+- Continuations.
+- Error propagation.
+- Yield behavior where supported.
+
+Never implement an opcode as an empty function or silently discard its operation.
+
+PHASE 5: Bytecode verification
+
+Create a verifier that runs before the VM executes a prototype.
+
+Check:
+
+- Instruction validity.
+- Operand counts.
+- Register bounds.
+- Constant indexes.
+- Capture indexes.
+- Upvalue references.
+- Jump destinations.
+- Instruction boundaries.
+- Function metadata.
+- Payload lengths.
+- Prototype consistency.
+
+Malformed bytecode must be rejected safely.
+
+PHASE 6: Instruction protection
+
+Implement independently generated instruction layouts.
+
+Include:
+
+- Per-build opcode permutations.
+- Multiple operand encodings.
+- Selected fused instructions.
+- Different instruction layouts.
+- Per-build metadata variation.
+
+Generate build randomness securely at compilation time.
+
+Do not claim randomization makes client-side code impossible to recover.
+
+PHASE 7: Constant protection
+
+Protect strings, numbers and other constant values.
+
+Requirements:
+
+- Typed constant representation.
+- Independent constant sections.
+- Lazy decoding.
+- Bounded caches.
+- Strict decoding validation.
+- Unicode support.
+- Escaped string support.
+- Correct nil and boolean handling.
+
+PHASE 8: Roblox/Luau runtime compatibility
+
+Build a dedicated host API adapter.
+
+Support legitimate Luau and Roblox behavior, including:
+
+- Global reads and writes.
+- Environment handling.
+- Tables and metatables.
+- Roblox datatypes.
+- Events and callbacks.
+- Common Instance methods.
+- pcall and xpcall.
+- Multiple return values.
+- Function calls that yield.
+
+Never replace unsupported functions with silent no-op implementations.
+
+Clearly document unsupported features.
+
+PHASE 9: Runtime integrity
+
+Implement:
+
+- Versioned payload identity.
+- Structural integrity verification.
+- Prototype metadata validation.
+- Immutable metadata where appropriate.
+- Runtime consistency checks.
+- Safe error handling.
+
+Use established cryptographic libraries where appropriate. Do not invent a cipher and call it secure.
+
+Do not rely on CFrame mathematics or timing checks as cryptographic protection.
+
+PHASE 10: Performance
+
+Implement:
+
+- Bounded instruction caching.
+- Lazy constant decoding.
+- Reduced memory allocations.
+- Efficient VM dispatch.
+- Controlled call-stack growth.
+- Payload-size limits.
+- Performance benchmarks.
+
+Measure actual runtime overhead.
+
+PHASE 11: Anti-logger feature
+
+Keep Anti-Logger 3000 separate from the real runtime.
+
+In inspection interfaces controlled by Dailyfuscator, allow a configurable fake inspection response:
+
+"Lol u tried to log my shi bud DAILYFUSCATOR ON TOP"
+
+It must never change program behavior, corrupt bytecode, or claim to detect external tools that it cannot actually observe.
+
+PHASE 12: Automated testing
+
+Create differential tests that compare original and protected execution.
+
+Test:
+
+- Simple functions.
+- Nested functions.
+- Closures.
+- Recursion.
+- Loops.
+- Tables.
+- Metatables.
+- Globals.
+- Varargs.
+- Multiple returns.
+- Errors.
+- Callbacks.
+- Roblox datatypes.
+- Large scripts.
+- Repeated execution.
+
+The protected program must preserve observable behavior.
+
+FINAL REQUIREMENTS
+
+- Modify the actual existing project.
+- Deliver complete working source code.
+- No placeholder opcodes.
+- No fake decryption.
+- No fabricated test results.
+- No silent runtime failures.
+- No broken UI.
+- No removal of working features.
+- Test every major component.
+- Document every implemented feature.
+- Keep compiler source maintainable.
+- Keep generated output compact.
+
+Build this incrementally. Fix correctness problems before adding additional protection layers.
+
+Final objective: Dailyfuscator v3.0 should have its own structured binary format, a real verified VM, proper closure and register management, robust runtime compatibility, and substantially improved resistance to static analysis.

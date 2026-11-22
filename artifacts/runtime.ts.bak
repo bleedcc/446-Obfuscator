@@ -1,0 +1,1097 @@
+import { utf8Bytes } from "./codec.ts";
+import type { PoolEntry } from "./protect.ts";
+import type { Proto } from "./vm.ts";
+import { freshIdent, type Rng } from "./rng.ts";
+
+export interface RuntimeNames {
+  ds: string;
+  dn: string;
+  vm: string;
+}
+
+export interface BuiltRuntime {
+  source: string;
+  checksumValue: number;
+  stringBlobs: number;
+  numberBlobs: number;
+  fused: number;
+}
+
+type Variant = 0 | 1 | 2;
+
+interface Params {
+  variant: Variant;
+  mul: number;
+  inv: number;
+  add: number;
+  xorc: number;
+  salt: number;
+  basis: number;
+  prime: number;
+  step: number;
+  smix: number;
+  m1: number;
+  m2: number;
+  lane: number;
+}
+
+const PRIMES = [131, 137, 149, 157, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223, 227, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293, 307, 311, 313, 317];
+const INSN_WIDTH = 13;
+
+function mod(n: number, m: number): number {
+  return ((n % m) + m) % m;
+}
+
+function inv256(mul: number): number {
+  let a = mul;
+  let b = 256;
+  let x0 = 1;
+  let x1 = 0;
+  while (b !== 0) {
+    const q = Math.floor(a / b);
+    const nb = a - q * b;
+    a = b;
+    b = nb;
+    const nx = x0 - q * x1;
+    x0 = x1;
+    x1 = nx;
+  }
+  return mod(x0, 256);
+}
+
+function mixsum(bytes: readonly number[], prime: number, basis: number): number {
+  let h = basis >>> 0;
+  for (const b of bytes) {
+    h = Math.imul(h, prime) >>> 0;
+    h = (h + (b & 255)) >>> 0;
+  }
+  return h >>> 0;
+}
+
+function u16le(n: number): number[] {
+  return [n & 255, (n >> 8) & 255];
+}
+
+function u32le(n: number): number[] {
+  const v = n >>> 0;
+  return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
+}
+
+function kbyte(i: number, user: readonly number[], bk: readonly number[]): number {
+  const i0 = i - 1;
+  const ub = user.length ? user[i0 % user.length] : 0;
+  const bb = bk[i0 % bk.length];
+  return (ub + bb) % 256;
+}
+
+function mix32(x: number, m1: number, m2: number): number {
+  x = x >>> 0;
+  x = Math.imul(x ^ (x >>> 16), m1) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), m2) >>> 0;
+  return (x ^ (x >>> 16)) >>> 0;
+}
+
+function blobSalt(index: number, salt: number, smix: number, m1: number, m2: number): number {
+  const mixed = ((salt + 1) ^ Math.imul(index, smix)) >>> 0;
+  return mix32(mixed, m1, m2) % 251;
+}
+
+function encByte(p: Params, plain: number, i: number, kb: number, salt: number): number {
+  const iadd = (i * p.add) % 256;
+  if (p.variant === 0) {
+    const mixed = mod(plain + kb + salt + iadd, 256);
+    const y = (mixed * p.mul) % 256;
+    return (y ^ p.xorc ^ ((i * p.step) % 256)) & 255;
+  }
+  if (p.variant === 1) {
+    const x = (plain ^ kb ^ iadd) & 255;
+    const y = mod(x + salt, 256);
+    const z = (y * p.mul) % 256;
+    return (z ^ p.xorc) & 255;
+  }
+  const x = mod(plain + iadd, 256);
+  const y = (x ^ kb ^ salt) & 255;
+  const z = (y * p.mul) % 256;
+  return (z ^ p.xorc ^ ((i * p.step) % 256)) & 255;
+}
+
+function decByte(p: Params, enc: number, i: number, kb: number, salt: number): number {
+  const iadd = (i * p.add) % 256;
+  if (p.variant === 0) {
+    const y = (enc ^ p.xorc ^ ((i * p.step) % 256)) & 255;
+    const mixed = (y * p.inv) % 256;
+    return mod(mixed - kb - salt - iadd, 256);
+  }
+  if (p.variant === 1) {
+    const z = (enc ^ p.xorc) & 255;
+    const y = (z * p.inv) % 256;
+    const x = mod(y - salt, 256);
+    return (x ^ kb ^ iadd) & 255;
+  }
+  const z = (enc ^ p.xorc ^ ((i * p.step) % 256)) & 255;
+  const y = (z * p.inv) % 256;
+  const x = (y ^ kb ^ salt) & 255;
+  return mod(x - iadd, 256);
+}
+
+function seal(payload: readonly number[], user: readonly number[], index: number, p: Params, bk: readonly number[]): number[] {
+  const sum = mixsum(payload, p.prime, p.basis);
+  const plain = [...u32le(sum), ...payload];
+  const salt = blobSalt(index, p.salt, p.smix, p.m1, p.m2);
+  return plain.map((b, idx) => encByte(p, b & 255, idx + 1, kbyte(idx + 1, user, bk), salt));
+}
+
+function unseal(blob: readonly number[], user: readonly number[], index: number, p: Params, bk: readonly number[]): number[] {
+  const salt = blobSalt(index, p.salt, p.smix, p.m1, p.m2);
+  const plain = blob.map((e, idx) => decByte(p, e & 255, idx + 1, kbyte(idx + 1, user, bk), salt));
+  if (plain.length < 4) throw new Error("sealed blob is shorter than its checksum");
+  const expect = (plain[0] + plain[1] * 256 + plain[2] * 65536 + plain[3] * 16777216) >>> 0;
+  const payload = plain.slice(4);
+  if (mixsum(payload, p.prime, p.basis) !== expect) throw new Error("blob checksum mismatch");
+  return payload;
+}
+
+function i16le(n: number): number[] {
+  let v = n | 0;
+  if (v < 0) v += 65536;
+  return [v & 255, (v >> 8) & 255];
+}
+
+function i24le(n: number): number[] {
+  let v = n | 0;
+  if (v < 0) v += 16777216;
+  return [v & 255, (v >> 8) & 255, (v >> 16) & 255];
+}
+
+function odd32(rng: Rng): number {
+  return (rng.next() | 1) >>> 0;
+}
+
+function pickParams(rng: Rng): Params {
+  const mul = 1 + 2 * rng.int(128);
+  const inv = inv256(mul);
+  if ((mul * inv) % 256 !== 1) throw new Error("cipher inverse is not invertible");
+  return {
+    variant: rng.int(3) as Variant,
+    mul,
+    inv,
+    add: 1 + rng.int(255),
+    xorc: rng.int(256),
+    salt: rng.int(251),
+    basis: rng.next() >>> 0,
+    prime: PRIMES[rng.int(PRIMES.length)],
+    step: 1 + rng.int(255),
+    smix: odd32(rng),
+    m1: odd32(rng),
+    m2: odd32(rng),
+    lane: odd32(rng),
+  };
+}
+
+function assertCipher(p: Params, bk: readonly number[]) {
+  const user = [3, 9, 17, 255, 0, 88];
+  for (let i = 1; i <= 40; i++) {
+    for (let plain = 0; plain < 256; plain += 17) {
+      const salt = blobSalt(i, p.salt, p.smix, p.m1, p.m2);
+      const kb = kbyte(i, user, bk);
+      const e = encByte(p, plain, i, kb, salt);
+      const back = decByte(p, e, i, kb, salt);
+      if (back !== plain) throw new Error("byte cipher did not round-trip");
+    }
+  }
+}
+
+class KeyBag {
+  private used = new Set<number>();
+  constructor(private rng: Rng) {}
+  next(): number {
+    for (;;) {
+      const k = 1 + this.rng.int(8191);
+      if (!this.used.has(k)) {
+        this.used.add(k);
+        return k;
+      }
+    }
+  }
+}
+
+function luaByteLiteral(bytes: readonly number[]): string {
+  let out = '"';
+  for (const b of bytes) {
+    const v = b & 255;
+    if (v >= 32 && v < 127 && v !== 34 && v !== 92) out += String.fromCharCode(v);
+    else out += "\\" + String(v).padStart(3, "0");
+  }
+  out += '"';
+  return out;
+}
+
+function luaDecByte(variant: Variant, names: Record<string, string>): string {
+  const iadd = `(i*${names.ADD})%256`;
+  if (variant === 0) {
+    return `local function ${names.decByte}(e,i,kb,salt)
+  local y=${names.xor8}(${names.xor8}(e,${names.XORC}),(i*${names.STEP})%256)
+  local mixed=(y*${names.INV})%256
+  return (mixed-kb-salt-${iadd})%256
+end`;
+  }
+  if (variant === 1) {
+    return `local function ${names.decByte}(e,i,kb,salt)
+  local z=${names.xor8}(e,${names.XORC})
+  local y=(z*${names.INV})%256
+  local x=(y-salt)%256
+  return ${names.xor8}(${names.xor8}(x,kb),${iadd})
+end`;
+  }
+  return `local function ${names.decByte}(e,i,kb,salt)
+  local z=${names.xor8}(${names.xor8}(e,${names.XORC}),(i*${names.STEP})%256)
+  local y=(z*${names.INV})%256
+  local x=${names.xor8}(${names.xor8}(y,kb),salt)
+  return (x-${iadd})%256
+end`;
+}
+
+function xs32(x: number): number {
+  x >>>= 0;
+  x ^= (x << 13) >>> 0;
+  x >>>= 0;
+  x ^= x >>> 17;
+  x >>>= 0;
+  x ^= (x << 5) >>> 0;
+  return x >>> 0;
+}
+
+function makePad(len: number, seed: number): string {
+  if (len <= 0) return "";
+  let x = (seed >>> 0) || 1;
+  let y = (~seed) >>> 0 || 1;
+  const sep = ["~", ".", "*", "!", "|", ",", "_"];
+  let out = "";
+  let n = 0;
+  while (out.length < len) {
+    x = xs32(x ^ Math.imul(n + 1, 0x9e3779b1));
+    y = (Math.imul(y ^ x, (n * 2 + 1) | 0) + (seed >>> 0)) >>> 0;
+    out += (x >>> 0).toString(16) + sep[n % sep.length] + (y >>> 0).toString(16);
+    n += 1;
+  }
+  return out.slice(0, len);
+}
+
+function mask13(m: number, m1: number, m2: number, lane: number): number[] {
+  const out: number[] = [];
+  let x = m >>> 0;
+  for (let i = 0; i < INSN_WIDTH; i++) {
+    x = mix32((x ^ Math.imul(i + 1, lane)) >>> 0, m1, m2);
+    out.push(x & 255);
+  }
+  return out;
+}
+
+function posKey(i: number, prime: number, basis: number, m1: number, m2: number): number {
+  return mix32((Math.imul(i, prime) ^ basis) >>> 0, m1, m2);
+}
+
+function nextChain(chain: number, hid: number, sel: number, i: number, xorOdd: number, m1: number, m2: number): number {
+  return mix32((chain ^ hid ^ Math.imul(((sel + 1) ^ i) & 0xffff, xorOdd)) >>> 0, m1, m2);
+}
+
+interface JumpRec {
+  pos: number;
+  chain: number;
+}
+
+function packCode(
+  code: number[][],
+  order: number[],
+  handlerForOp: readonly number[],
+  selectorForOp: readonly number[],
+  chain0: number,
+  addOdd: number,
+  xorOdd: number,
+  prime: number,
+  basis: number,
+  m1: number,
+  m2: number,
+  lane: number,
+  rng: Rng,
+): { plain: number[]; jumps: JumpRec[] } {
+  const plain: number[] = [];
+  const jumps: JumpRec[] = [];
+  let chain = chain0 >>> 0;
+  for (let n = 0; n < code.length; n++) {
+    const ins = code[n];
+    const i = n + 1;
+    jumps.push({ pos: plain.length + 1, chain });
+    const sel = selectorForOp[ins[0]] & 255;
+    const hid = handlerForOp[ins[0]] >>> 0;
+    const m = mix32((chain ^ Math.imul(i, addOdd)) >>> 0, m1, m2);
+    const token = (hid ^ m) >>> 0;
+    const ab = i16le(ins[1]);
+    const bb = i24le(ins[2]);
+    const cb = i24le(ins[3]);
+    const fields = [
+      token & 255,
+      (token >>> 8) & 255,
+      (token >>> 16) & 255,
+      (token >>> 24) & 255,
+      sel & 255,
+      ab[0],
+      ab[1],
+      bb[0],
+      bb[1],
+      bb[2],
+      cb[0],
+      cb[1],
+      cb[2],
+    ];
+    const mask = mask13(m, m1, m2, lane);
+    for (let k = 0; k < INSN_WIDTH; k++) fields[k] = (fields[k] ^ mask[k]) & 255;
+    for (let pos = 0; pos < INSN_WIDTH; pos++) plain.push(fields[order[pos]]);
+    const padN = rng.int(3);
+    for (let k = 0; k < padN; k++) plain.push(rng.int(256));
+    chain = nextChain(chain, hid, sel, i, xorOdd, m1, m2);
+  }
+  jumps.push({ pos: plain.length + 1, chain });
+  chain = chain0 >>> 0;
+  for (let n = 0; n < code.length; n++) {
+    const i = n + 1;
+    const at = jumps[n].pos - 1;
+    const raw = plain.slice(at, at + INSN_WIDTH);
+    const fields = new Array<number>(INSN_WIDTH).fill(0);
+    for (let pos = 0; pos < INSN_WIDTH; pos++) fields[order[pos]] = raw[pos];
+    const m = mix32((chain ^ Math.imul(i, addOdd)) >>> 0, m1, m2);
+    const mask = mask13(m, m1, m2, lane);
+    for (let k = 0; k < INSN_WIDTH; k++) fields[k] = (fields[k] ^ mask[k]) & 255;
+    let token = (fields[0] + fields[1] * 256 + fields[2] * 65536 + fields[3] * 16777216) >>> 0;
+    token = (token ^ m) >>> 0;
+    const sel = fields[4] & 255;
+    let a = fields[5] + fields[6] * 256;
+    if (a >= 32768) a -= 65536;
+    let b = fields[7] + fields[8] * 256 + fields[9] * 65536;
+    if (b >= 8388608) b -= 16777216;
+    let c = fields[10] + fields[11] * 256 + fields[12] * 65536;
+    if (c >= 8388608) c -= 16777216;
+    if (
+      token !== (handlerForOp[code[n][0]] >>> 0) ||
+      sel !== (selectorForOp[code[n][0]] & 255) ||
+      a !== code[n][1] ||
+      b !== code[n][2] ||
+      c !== code[n][3]
+    ) {
+      throw new Error("instruction packing did not round-trip");
+    }
+    chain = nextChain(chain, token, sel, i, xorOdd, m1, m2);
+  }
+  return { plain, jumps };
+}
+
+function varyCommutative(code: number[][], rng: Rng) {
+  for (const ins of code) {
+    if ((ins[0] === 9 || ins[0] === 11 || ins[0] === 21) && rng.int(2) === 0) {
+      const tmp = ins[2];
+      ins[2] = ins[3];
+      ins[3] = tmp;
+    }
+  }
+}
+
+function fuseBranches(code: number[][]): { code: number[][]; fused: number } {
+  const src = code.map((ins) => ins.slice());
+  const drop = new Set<number>();
+  let fused = 0;
+  for (let i = 0; i < src.length - 1; i++) {
+    if (drop.has(i)) continue;
+    if (src[i][0] === 22 && src[i + 1][0] === 23 && src[i + 1][3] === 0) {
+      src[i + 1] = [23, src[i][1], src[i + 1][2], src[i][3] === 1 ? 1 : 2];
+      drop.add(i);
+      fused += 1;
+    }
+  }
+  const newIndex: number[] = [];
+  let next = 1;
+  for (let i = 0; i < src.length; i++) {
+    if (drop.has(i)) newIndex[i] = -1;
+    else newIndex[i] = next++;
+  }
+  const end = next;
+  const mapTarget = (old: number) => {
+    if (old > src.length) return end;
+    if (old < 1) return old;
+    let i = old - 1;
+    while (i < src.length && newIndex[i] < 0) i += 1;
+    if (i >= src.length) return end;
+    return newIndex[i];
+  };
+  const out: number[][] = [];
+  for (let i = 0; i < src.length; i++) {
+    if (drop.has(i)) continue;
+    const ins = src[i].slice();
+    if (ins[0] === 23) {
+      ins[2] = mapTarget(ins[2]);
+      if (ins[2] < 0 || ins[2] > end) throw new Error("fused jump target is outside the program");
+    }
+    out.push(ins);
+  }
+  return { code: out, fused };
+}
+
+function splitBytes(bytes: number[], rng: Rng): number[][] {
+  if (bytes.length <= 2) return [bytes.slice()];
+  const parts: number[][] = [];
+  let i = 0;
+  while (i < bytes.length) {
+    const remain = bytes.length - i;
+    const take = remain <= 3 ? remain : 1 + rng.int(Math.min(3, remain));
+    parts.push(bytes.slice(i, i + take));
+    i += take;
+  }
+  return parts;
+}
+
+interface HandlerSpec {
+  id: number;
+  aKey: number;
+  bKey: number;
+  body: string;
+}
+
+interface HostPair {
+  a: number;
+  b: number;
+  aKey: number;
+  bKey: number;
+}
+
+export function buildRuntime(opt: {
+  strings: PoolEntry[];
+  numbers: PoolEntry[];
+  protos: Proto[];
+  buildKey: number[];
+  opMap: number[];
+  globals: string[];
+  hardening: boolean;
+  integrity: boolean;
+  rng: Rng;
+  names: RuntimeNames;
+  userBody: string;
+  minBytes: number;
+  used: Set<string>;
+}): BuiltRuntime {
+  const rng = opt.rng;
+  const params = pickParams(rng);
+  const bk = opt.buildKey.length ? opt.buildKey.slice(0, 8) : [1];
+  while (bk.length < 4) bk.push(rng.int(256));
+  assertCipher(params, bk);
+  const strings = opt.strings.map((e) => ({ plain: utf8Bytes(e.plain), key: e.userKey ? utf8Bytes(e.userKey) : [] }));
+  const numbers = opt.numbers.map((e) => ({ plain: utf8Bytes(e.plain), key: e.userKey ? utf8Bytes(e.userKey) : [] }));
+  let tagS = 1 + rng.int(255);
+  let tagN = 1 + rng.int(255);
+  while (tagN === tagS) tagN = 1 + rng.int(255);
+  const order = rng.shuffle([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  const keys = new KeyBag(rng);
+  const id = () => freshIdent(rng, opt.used);
+  const usedIds = new Set<number>();
+  const allocId = () => {
+    for (;;) {
+      const v = rng.next() >>> 0 || 1;
+      if (!usedIds.has(v)) {
+        usedIds.add(v);
+        return v;
+      }
+    }
+  };
+  const F = {
+    R: id(), i: id(), top: id(), kz: id(), jumps: id(), chains: id(), nins: id(),
+    stop: id(), ret: id(), nret: id(), roll: id(), pos: id(),
+  };
+  const n = {
+    hp: id(), byte: id(), char: id(), concat: id(), tonum: id(), sel: id(), unpack: id(),
+    err: id(), floor: id(), bxor: id(), xor8: id(), umul: id(), kbyte: id(), decByte: id(),
+    decstr: id(), u16: id(), u24: id(), u32: id(), pool: id(), BK: id(), MUL: id(), INV: id(),
+    ADD: id(), XORC: id(), SALT: id(), BASIS: id(), PRIME: id(), STEP: id(), SMIX: id(), M1: id(),
+    M2: id(), LANE: id(), ADODD: id(), mix: id(), saltOf: id(), ord: id(), MAP: id(), TAGS: id(),
+    TAGN: id(), EXPECT: id(), mapS: id(), mapN: id(), mapP: id(), strAt: id(), numAt: id(),
+    HND: id(), take: id(), pack: id(), BIN: id(), UN: id(), GETG: id(), SETG: id(), st: id(),
+    desc: id(), kz: id(),
+  };
+  const pair = (value: number): HostPair => {
+    const a = rng.next() >>> 0;
+    const b = (a ^ (value >>> 0)) >>> 0;
+    return { a, b, aKey: keys.next(), bKey: keys.next() };
+  };
+  const pendingPairs: HostPair[] = [];
+  const fullExpr = (value: number) => {
+    const p = pair(value >>> 0);
+    pendingPairs.push(p);
+    return `${n.bxor}(${n.hp}[${p.aKey}],${n.hp}[${p.bKey}])`;
+  };
+  const byteExpr = (value: number) => {
+    const p = pair(value & 255);
+    pendingPairs.push(p);
+    return `(${n.bxor}(${n.hp}[${p.aKey}],${n.hp}[${p.bKey}])%256)`;
+  };
+  const bkPairs = bk.map((b) => pair(b));
+  const mulP = pair(params.mul);
+  const invP = pair(params.inv);
+  const addP = pair(params.add);
+  const xorP = pair(params.xorc);
+  const saltP = pair(params.salt);
+  const basisP = pair(params.basis);
+  const primeP = pair(params.prime);
+  const tagSP = pair(tagS);
+  const tagNP = pair(tagN);
+  const stepP = pair(params.step);
+  const smixP = pair(params.smix);
+  const m1P = pair(params.m1);
+  const m2P = pair(params.m2);
+  const laneP = pair(params.lane);
+  const addOdd = (params.add | 1) & 255;
+  const xorOdd = (params.xorc | 1) & 255;
+  const addOddP = pair(addOdd);
+  const binOps = rng.shuffle([
+    { key: "add", lua: "return x+y" },
+    { key: "sub", lua: "return x-y" },
+    { key: "mul", lua: "return x*y" },
+    { key: "div", lua: "return x/y" },
+    { key: "mod", lua: "return x%y" },
+    { key: "pow", lua: "return x^y" },
+    { key: "lt", lua: "return x<y" },
+    { key: "le", lua: "return x<=y" },
+    { key: "eq", lua: "return x==y" },
+  ]);
+  const unOps = rng.shuffle([
+    { key: "unm", lua: "return -x" },
+    { key: "not", lua: "return not x" },
+    { key: "len", lua: "return #x" },
+  ]);
+  const idExpr: Record<string, string> = {};
+  for (const op of [...binOps, ...unOps]) idExpr[op.key] = fullExpr(rng.next() >>> 0 || 1);
+  const binLua = `local function ${n.BIN}(op,x,y)\n${binOps
+    .map((op, i) => `${i === 0 ? "if" : "elseif"} op==${idExpr[op.key]} then ${op.lua}`)
+    .join("\n")}\nelse ${n.err}("b",0) end\nend`;
+  const unLua = `local function ${n.UN}(op,x)\n${unOps
+    .map((op, i) => `${i === 0 ? "if" : "elseif"} op==${idExpr[op.key]} then ${op.lua}`)
+    .join("\n")}\nelse ${n.err}("u",0) end\nend`;
+  const handlerBody = (op: number): string => {
+    const R = `st.${F.R}`;
+    const ip = `st.${F.i}`;
+    switch (op) {
+      case 0:
+        return `${R}[a]=${R}[b]`;
+      case 1:
+        return `${R}[a]=st.${F.kz}(b)`;
+      case 2:
+        return `${R}[a]=nil`;
+      case 3:
+        return `${R}[a]=b==1`;
+      case 4:
+        return `${R}[a]=${n.GETG}(st.${F.kz}(b))`;
+      case 5:
+        return `${n.SETG}(st.${F.kz}(b),${R}[a])`;
+      case 6:
+        return `${R}[a]=${R}[b][${R}[c]]`;
+      case 7:
+        return `${R}[a][${R}[b]]=${R}[c]`;
+      case 8:
+        return `${R}[a]={}`;
+      case 9:
+        return `${R}[a]=${n.BIN}(${idExpr.add},${R}[b],${R}[c])`;
+      case 10:
+        return `${R}[a]=${n.BIN}(${idExpr.sub},${R}[b],${R}[c])`;
+      case 11:
+        return `${R}[a]=${n.BIN}(${idExpr.mul},${R}[b],${R}[c])`;
+      case 12:
+        return `${R}[a]=${n.BIN}(${idExpr.div},${R}[b],${R}[c])`;
+      case 13:
+        return `${R}[a]=${n.BIN}(${idExpr.mod},${R}[b],${R}[c])`;
+      case 14:
+        return `${R}[a]=${n.BIN}(${idExpr.pow},${R}[b],${R}[c])`;
+      case 15:
+        return `${R}[a]=${n.UN}(${idExpr.unm},${R}[b])`;
+      case 16:
+        return `${R}[a]=${n.UN}(${idExpr.not},${R}[b])`;
+      case 17:
+        return `${R}[a]=${n.UN}(${idExpr.len},${R}[b])`;
+      case 18:
+        return `local t={}\nif c<b then t[1]=${R}[b] else for i=b,c do t[#t+1]=${R}[i] end end\n${R}[a]=${n.concat}(t)`;
+      case 19:
+        return `${R}[a]=${n.BIN}(${idExpr.lt},${R}[b],${R}[c])`;
+      case 20:
+        return `${R}[a]=${n.BIN}(${idExpr.le},${R}[b],${R}[c])`;
+      case 21:
+        return `${R}[a]=${n.BIN}(${idExpr.eq},${R}[b],${R}[c])`;
+      case 22:
+        return `local tv=not not ${R}[a]\nif tv==(c==1) then ${ip}=${ip}+1 end`;
+      case 23:
+        return `if c==0 then ${ip}=b elseif c==1 then if not ${R}[a] then ${ip}=b end elseif c==2 then if ${R}[a] then ${ip}=b end else ${n.err}("j",0) end`;
+      case 24:
+        return `local fn=${R}[a]\nlocal args={}\nfor i=1,b do args[i]=${R}[a+i] end\nlocal pk=${n.pack}(fn(${n.unpack}(args,1,b)))\nif c<0 then\nfor i=1,pk.n do ${R}[a+i-1]=pk[i] end\nst.${F.top}=a+pk.n-1\nelseif c>0 then\nfor i=1,c do ${R}[a+i-1]=pk[i] end\nend`;
+      case 25:
+        return `st.${F.stop}=1\nst.${F.ret}={}\nif b==0 then st.${F.nret}=0\nelseif b<0 then\nlocal nr=st.${F.top}-a+1\nif nr<0 then nr=0 end\nst.${F.nret}=nr\nfor i=1,nr do st.${F.ret}[i]=${R}[a+i-1] end\nelse\nst.${F.nret}=b\nfor i=1,b do st.${F.ret}[i]=${R}[a+i-1] end\nend`;
+      case 26:
+        return `${R}[a]=function(...) return ${opt.names.vm}(b,nil,...) end`;
+      default:
+        return `${n.err}("h0",0)`;
+    }
+  };
+  const usedSel = new Set<number>();
+  const allocSel = () => {
+    for (;;) {
+      const s = rng.int(256);
+      if (!usedSel.has(s)) {
+        usedSel.add(s);
+        return s;
+      }
+    }
+  };
+  const ranked = opt.opMap.map((mapped, op) => ({ op, mapped }));
+  ranked.sort((a, b) => a.mapped - b.mapped || a.op - b.op);
+  const handlerForOp = new Array<number>(opt.opMap.length).fill(0);
+  const selectorForOp = new Array<number>(opt.opMap.length).fill(0);
+  const realHandlers: HandlerSpec[] = [];
+  for (let i = 0; i < ranked.length; i += 4) {
+    const group = ranked.slice(i, i + 4);
+    const hid = allocId();
+    const hp = pair(hid);
+    pendingPairs.push(hp);
+    const arms: { cmp: string; body: string }[] = [];
+    for (const item of group) {
+      const sel = allocSel();
+      handlerForOp[item.op] = hid;
+      selectorForOp[item.op] = sel;
+      arms.push({ cmp: byteExpr(sel), body: handlerBody(item.op) });
+    }
+    const decoySel = allocSel();
+    const mul = 3 + rng.int(90);
+    const add = rng.int(97);
+    arms.push({ cmp: byteExpr(decoySel), body: `st.${F.roll}=(st.${F.roll}*${mul}+${add})%4294967296` });
+    const shuffledArms = rng.shuffle(arms);
+    let body = "";
+    shuffledArms.forEach((arm, idx) => {
+      body += `${idx === 0 ? "if" : "elseif"} sel==${arm.cmp} then\n${arm.body}\n`;
+    });
+    body += `else ${n.err}("q",0) end`;
+    realHandlers.push({ id: hid, aKey: hp.aKey, bKey: hp.bKey, body });
+  }
+  let fusedTotal = 0;
+  const protoPacked = opt.protos.map((proto, protoIndex) => {
+    const parts: { tag: number; indexes: number[] }[] = [];
+    for (const c of proto.consts) {
+      const key = proto.userKey ? utf8Bytes(proto.userKey) : [];
+      if (c.k === "s") {
+        const raw = utf8Bytes(c.s ?? "");
+        const frags = splitBytes(raw, rng);
+        const joined = frags.flat();
+        if (joined.length !== raw.length || joined.some((b, bi) => b !== raw[bi])) throw new Error("string split did not round-trip");
+        const indexes: number[] = [];
+        for (const frag of frags) {
+          strings.push({ plain: frag, key });
+          indexes.push(strings.length);
+        }
+        parts.push({ tag: tagS, indexes });
+      } else if (c.k === "n") {
+        numbers.push({ plain: utf8Bytes(c.s ?? String(c.n ?? "")), key });
+        parts.push({ tag: tagN, indexes: [numbers.length] });
+      } else throw new Error("unsupported VM constant");
+    }
+    const shaped = fuseBranches(proto.code.map((row) => row.slice()));
+    varyCommutative(shaped.code, rng);
+    fusedTotal += shaped.fused;
+    const chain0 = mix32((params.basis ^ Math.imul(protoIndex + 1, params.prime)) >>> 0, params.m1, params.m2);
+    const packed = packCode(shaped.code, order, handlerForOp, selectorForOp, chain0, addOdd, xorOdd, params.prime, params.basis, params.m1, params.m2, params.lane, rng);
+    const jumpPayload = [...u16le(proto.nparams), ...u16le(shaped.code.length)];
+    for (let j = 0; j < packed.jumps.length; j++) {
+      const rec = packed.jumps[j];
+      const pk = posKey(j + 1, params.prime, params.basis, params.m1, params.m2);
+      jumpPayload.push(...u32le((rec.pos ^ pk) >>> 0));
+      jumpPayload.push(...u32le((rec.chain ^ mix32((pk ^ params.lane) >>> 0, params.m1, params.m2)) >>> 0));
+    }
+    const konstPayload: number[] = [...u16le(parts.length)];
+    for (const part of parts) {
+      konstPayload.push(part.tag & 255);
+      if (part.tag === tagS) {
+        if (part.indexes.length > 65535) throw new Error("too many string fragments");
+        konstPayload.push(...u16le(part.indexes.length));
+        for (const idx of part.indexes) konstPayload.push(...u16le(idx));
+      } else konstPayload.push(...u16le(part.indexes[0]));
+    }
+    return { code: packed.plain, jumps: jumpPayload, konst: konstPayload, key: proto.userKey ? utf8Bytes(proto.userKey) : [] };
+  });
+  const hardRows: { name: string; index: number }[] = [];
+  if (opt.hardening) {
+    for (const name of opt.globals) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`Hard mode cannot bind global "${name}"`);
+      strings.push({ plain: utf8Bytes(name), key: [] });
+      hardRows.push({ name, index: strings.length });
+    }
+  }
+  type Arranged =
+    | { kind: "live"; payload: number[]; key: number[]; index: number; cipher?: number[]; ref?: { slot: number } }
+    | { kind: "decoy"; index: number; lua: string };
+  const arranged: Arranged[] = [];
+  const remember = (payload: number[], key: number[]) => {
+    const ref = { slot: 0 };
+    arranged.push({ kind: "live", payload, key, index: 0, ref });
+    return ref;
+  };
+  const stringRefs = strings.map((s) => remember(s.plain, s.key));
+  const numberRefs = numbers.map((s) => remember(s.plain, s.key));
+  const protoRefs = protoPacked.map((p) => ({
+    code: remember(p.code, []),
+    jumps: remember(p.jumps, []),
+    konst: remember(p.konst, p.key),
+  }));
+  const watched = new Set(strings.map((s) => String.fromCharCode(...s.plain.filter((b) => b >= 32 && b < 127))));
+  for (let d = 0; d < 36; d++) {
+    const len = 4 + rng.int(10);
+    const bytes: number[] = [];
+    for (let i = 0; i < len; i++) bytes.push(rng.int(256));
+    const asText = String.fromCharCode(...bytes.filter((b) => b >= 32 && b < 127));
+    if (asText.length >= 4 && watched.has(asText)) continue;
+    arranged.push({ kind: "decoy", index: 0, lua: luaByteLiteral(bytes) });
+  }
+  for (let d = 0; d < 18; d++) arranged.push({ kind: "decoy", index: 0, lua: String(rng.next() >>> 0) });
+  const shuffled = rng.shuffle(arranged);
+  shuffled.forEach((item, i) => {
+    item.index = i + 1;
+  });
+  for (const item of shuffled) {
+    if (item.kind === "live") {
+      item.cipher = seal(item.payload, item.key, item.index, params, bk);
+      if (item.ref) item.ref.slot = item.index;
+      const back = unseal(item.cipher, item.key, item.index, params, bk);
+      if (back.length !== item.payload.length || back.some((b, i) => b !== (item.payload[i] & 255))) {
+        throw new Error("sealed pool record did not round-trip");
+      }
+    }
+  }
+  const mapPayload: number[] = [];
+  const pushU16 = (v: number) => mapPayload.push(...u16le(v));
+  pushU16(stringRefs.length);
+  for (const ref of stringRefs) pushU16(ref.slot);
+  pushU16(numberRefs.length);
+  for (const ref of numberRefs) pushU16(ref.slot);
+  pushU16(protoRefs.length);
+  for (const ref of protoRefs) {
+    pushU16(ref.code.slot);
+    pushU16(ref.jumps.slot);
+    pushU16(ref.konst.slot);
+  }
+  const decoyHandlers: HandlerSpec[] = [];
+  for (let d = 0; d < 24; d++) {
+    const hid = allocId();
+    const hp = pair(hid);
+    pendingPairs.push(hp);
+    const mul = 3 + rng.int(90);
+    const add = rng.int(97);
+    decoyHandlers.push({ id: hid, aKey: hp.aKey, bKey: hp.bKey, body: `st.${F.roll}=(st.${F.roll}*${mul}+${add})%4294967296` });
+  }
+  const mapIndex = shuffled.length + 1;
+  const mapCipher = seal(mapPayload, [], mapIndex, params, bk);
+  const mapBack = unseal(mapCipher, [], mapIndex, params, bk);
+  if (mapBack.some((b, i) => b !== (mapPayload[i] & 255))) throw new Error("map record did not round-trip");
+  const expect = mixsum(mapPayload, params.prime, params.basis);
+  const expectP = pair(expect);
+  const mapP = pair(mapIndex);
+  const poolLuas = shuffled.map((item) => (item.kind === "decoy" ? item.lua : luaByteLiteral(item.cipher ?? [])));
+  poolLuas.push(luaByteLiteral(mapCipher));
+  const kPrim = {
+    byte: keys.next(), char: keys.next(), concat: keys.next(), tonum: keys.next(), sel: keys.next(),
+    unpack: keys.next(), err: keys.next(), floor: keys.next(), pool: keys.next(),
+  };
+  const hostNumbers: { key: number; value: number }[] = [];
+  const pushPair = (p: HostPair) => {
+    hostNumbers.push({ key: p.aKey, value: p.a >>> 0 }, { key: p.bKey, value: p.b >>> 0 });
+  };
+  bkPairs.forEach(pushPair);
+  pendingPairs.forEach(pushPair);
+  [mulP, invP, addP, xorP, saltP, basisP, primeP, tagSP, tagNP, stepP, smixP, m1P, m2P, laneP, addOddP, expectP, mapP].forEach(pushPair);
+  const fields: string[] = [];
+  fields.push(`[${kPrim.byte}]=string.byte`);
+  fields.push(`[${kPrim.char}]=string.char`);
+  fields.push(`[${kPrim.concat}]=table.concat`);
+  fields.push(`[${kPrim.tonum}]=tonumber`);
+  fields.push(`[${kPrim.sel}]=select`);
+  fields.push(`[${kPrim.unpack}]=table.unpack or unpack`);
+  fields.push(`[${kPrim.err}]=error`);
+  fields.push(`[${kPrim.floor}]=math.floor`);
+  fields.push(`[${kPrim.pool}]={${poolLuas.join(",")}}`);
+  for (const row of hostNumbers) fields.push(`[${row.key}]=${row.value >>> 0}`);
+  for (let d = 0; d < 12; d++) fields.push(`[${keys.next()}]=${rng.next() >>> 0}`);
+  const xorOf = (p: HostPair, width: "byte" | "full") =>
+    width === "byte" ? `(${n.bxor}(${n.hp}[${p.aKey}],${n.hp}[${p.bKey}])%256)` : `${n.bxor}(${n.hp}[${p.aKey}],${n.hp}[${p.bKey}])`;
+  const handlers = rng.shuffle([...realHandlers, ...decoyHandlers]);
+  const handlerLua = handlers
+    .map((h) => `${n.HND}[${n.bxor}(${n.hp}[${h.aKey}],${n.hp}[${h.bKey}])]=function(st,a,b,c,sel)\n${h.body}\nend`)
+    .join("\n");
+  const hardGet = hardRows.map((r, i) => `${i === 0 ? "if" : "elseif"} n==${n.strAt}(${r.index},"") then return ${r.name}`).join(" ");
+  const hardSet = hardRows.map((r, i) => `${i === 0 ? "if" : "elseif"} n==${n.strAt}(${r.index},"") then ${r.name}=v`).join(" ");
+  const getLua = opt.hardening
+    ? hardRows.length
+      ? `local function ${n.GETG}(n) ${hardGet} end return nil end`
+      : `local function ${n.GETG}(n) return nil end`
+    : `local function ${n.GETG}(n) return _G[n] end`;
+  const setLua = opt.hardening
+    ? hardRows.length
+      ? `local function ${n.SETG}(n,v) ${hardSet} end end`
+      : `local function ${n.SETG}(n,v) end`
+    : `local function ${n.SETG}(n,v) _G[n]=v end`;
+  const bkLua = bkPairs.map((p) => `${n.bxor}(${n.hp}[${p.aKey}],${n.hp}[${p.bKey}])%256`).join(",");
+  const ordLua = `{${order.map((field) => field + 1).join(",")}}`;
+  const user = opt.userBody.trim();
+  const body = `local ${n.byte},${n.char},${n.concat},${n.tonum},${n.sel},${n.unpack},${n.err},${n.floor}=${n.hp}[${kPrim.byte}],${n.hp}[${kPrim.char}],${n.hp}[${kPrim.concat}],${n.hp}[${kPrim.tonum}],${n.hp}[${kPrim.sel}],${n.hp}[${kPrim.unpack}],${n.hp}[${kPrim.err}],${n.hp}[${kPrim.floor}]
+local function ${n.bxor}(a,b)
+  a=a%4294967296
+  b=b%4294967296
+  local r,p=0,1
+  for _=1,32 do
+    local x,y=a%2,b%2
+    if x~=y then r=r+p end
+    a=${n.floor}((a-x)/2)
+    b=${n.floor}((b-y)/2)
+    p=p*2
+  end
+  return r%4294967296
+end
+local function ${n.xor8}(a,b)
+  a=a%256
+  b=b%256
+  local r,p=0,1
+  for _=1,8 do
+    local x,y=a%2,b%2
+    if x~=y then r=r+p end
+    a=${n.floor}((a-x)/2)
+    b=${n.floor}((b-y)/2)
+    p=p*2
+  end
+  return r
+end
+local function ${n.umul}(a,b)
+  a=a%4294967296
+  b=b%4294967296
+  local a0=a%65536
+  local a1=${n.floor}((a-a0)/65536)
+  local b0=b%65536
+  local b1=${n.floor}((b-b0)/65536)
+  local p=a0*b0
+  p=(p+(a0*b1%65536)*65536)%4294967296
+  p=(p+(a1*b0%65536)*65536)%4294967296
+  return p
+end
+local ${n.MUL}=${xorOf(mulP, "byte")}
+local ${n.INV}=${xorOf(invP, "byte")}
+local ${n.ADD}=${xorOf(addP, "byte")}
+local ${n.XORC}=${xorOf(xorP, "byte")}
+local ${n.SALT}=${xorOf(saltP, "byte")}
+local ${n.BASIS}=${xorOf(basisP, "full")}
+local ${n.PRIME}=${xorOf(primeP, "full")}
+local ${n.STEP}=${xorOf(stepP, "byte")}
+local ${n.SMIX}=${xorOf(smixP, "full")}
+local ${n.M1}=${xorOf(m1P, "full")}
+local ${n.M2}=${xorOf(m2P, "full")}
+local ${n.LANE}=${xorOf(laneP, "full")}
+local ${n.ADODD}=${xorOf(addOddP, "byte")}
+local ${n.MAP}=${xorOf(mapP, "full")}
+local ${n.TAGS}=${xorOf(tagSP, "byte")}
+local ${n.TAGN}=${xorOf(tagNP, "byte")}
+local ${n.EXPECT}=${xorOf(expectP, "full")}
+local ${n.BK}={${bkLua}}
+local ${n.pool}=${n.hp}[${kPrim.pool}]
+local function ${n.kbyte}(i,key)
+  local i0=i-1
+  local ub=0
+  local kl=#key
+  if kl>0 then ub=${n.byte}(key,(i0%kl)+1) end
+  local bb=${n.BK}[(i0%#${n.BK})+1]
+  return (ub+bb)%256
+end
+local function ${n.mix}(x)
+  x=x%4294967296
+  x=${n.bxor}(x,${n.floor}(x/65536))
+  x=${n.umul}(x,${n.M1})
+  x=${n.bxor}(x,${n.floor}(x/32768))
+  x=${n.umul}(x,${n.M2})
+  x=${n.bxor}(x,${n.floor}(x/65536))
+  return x%4294967296
+end
+local function ${n.saltOf}(index)
+  return ${n.mix}(${n.bxor}(${n.SALT}+1,${n.umul}(index,${n.SMIX})))%251
+end
+${luaDecByte(params.variant, n)}
+local function ${n.decstr}(blob,key,index)
+  if type(key)~="string" then key="" end
+  if type(blob)~="string" then ${n.err}("t",0) end
+  local salt=${n.saltOf}(index)
+  local nb=#blob
+  local bytes={}
+  for i=1,nb do bytes[i]=${n.decByte}(${n.byte}(blob,i),i,${n.kbyte}(i,key),salt) end
+  if nb<4 then ${n.err}("s",0) end
+  local expect=(bytes[1]+bytes[2]*256+bytes[3]*65536+bytes[4]*16777216)%4294967296
+  local h=${n.BASIS}
+  for i=5,nb do h=(${n.umul}(h,${n.PRIME})+bytes[i])%4294967296 end
+  if h~=expect then ${n.err}("c",0) end
+  local t={}
+  for i=5,nb do t[#t+1]=${n.char}(bytes[i]) end
+  return ${n.concat}(t)
+end
+local function ${n.u16}(s,i) return ${n.byte}(s,i)+${n.byte}(s,i+1)*256 end
+local function ${n.u24}(s,i) return ${n.byte}(s,i)+${n.byte}(s,i+1)*256+${n.byte}(s,i+2)*65536 end
+local function ${n.u32}(s,i) return (${n.byte}(s,i)+${n.byte}(s,i+1)*256+${n.byte}(s,i+2)*65536+${n.byte}(s,i+3)*16777216)%4294967296 end
+local ${n.mapS}, ${n.mapN}, ${n.mapP} = {}, {}, {}
+do
+  local s=${n.decstr}(${n.pool}[${n.MAP}],"",${n.MAP})
+  ${opt.integrity ? `local h=${n.BASIS}\n  for i=1,#s do h=(${n.umul}(h,${n.PRIME})+${n.byte}(s,i))%4294967296 end\n  if h~=${n.EXPECT} then ${n.err}("i",0) end` : ""}
+  local p=1
+  local ns=${n.u16}(s,p); p=p+2
+  for i=1,ns do ${n.mapS}[i]=${n.u16}(s,p); p=p+2 end
+  local nn=${n.u16}(s,p); p=p+2
+  for i=1,nn do ${n.mapN}[i]=${n.u16}(s,p); p=p+2 end
+  local np=${n.u16}(s,p); p=p+2
+  for i=1,np do
+    ${n.mapP}[i]={${n.u16}(s,p),${n.u16}(s,p+2),${n.u16}(s,p+4)}
+    p=p+6
+  end
+end
+local function ${n.strAt}(i,key)
+  local slot=${n.mapS}[i]
+  return ${n.decstr}(${n.pool}[slot],key,slot)
+end
+local function ${n.numAt}(i,key)
+  local slot=${n.mapN}[i]
+  return ${n.decstr}(${n.pool}[slot],key,slot)
+end
+${getLua}
+${setLua}
+${binLua}
+${unLua}
+local function ${n.pack}(...)
+  return {n=${n.sel}("#",...),...}
+end
+local ${opt.names.vm}
+local ${n.HND}={}
+${handlerLua}
+setmetatable(${n.HND},{__index=function() return function() ${n.err}("x",0) end end})
+local function ${opt.names.ds}(i,key)
+  if type(key)~="string" then key="" end
+  return ${n.strAt}(i,key)
+end
+local function ${opt.names.dn}(i,key)
+  if type(key)~="string" then key="" end
+  local s=${n.numAt}(i,key)
+  local v
+  if s=="-0" then v=-0 else v=${n.tonum}(s) end
+  if v==nil then ${n.err}(" ",0) end
+  return v
+end
+${opt.names.vm}=function(pi,key,...)
+  if type(key)~="string" then key="" end
+  local rec=${n.mapP}[pi]
+  if rec==nil then ${n.err}("p",0) end
+  local bc=${n.decstr}(${n.pool}[rec[1]],"",rec[1])
+  local js=${n.decstr}(${n.pool}[rec[2]],"",rec[2])
+  local nparams=${n.u16}(js,1)
+  local nins=${n.u16}(js,3)
+  local ${F.jumps}={}
+  local ${F.chains}={}
+  local jp=5
+  for i=1,nins+1 do
+    local pk=${n.mix}(${n.bxor}(${n.umul}(i,${n.PRIME}),${n.BASIS}))
+    ${F.jumps}[i]=${n.bxor}(${n.u32}(js,jp),pk); jp=jp+4
+    ${F.chains}[i]=${n.bxor}(${n.u32}(js,jp),${n.mix}(${n.bxor}(pk,${n.LANE}))); jp=jp+4
+  end
+  local ks=${n.decstr}(${n.pool}[rec[3]],key,rec[3])
+  local ${n.desc}={}
+  local kp=3
+  local nk=${n.u16}(ks,1)
+  for i=1,nk do
+    local tag=${n.byte}(ks,kp); kp=kp+1
+    if tag==${n.TAGS} then
+      local nf=${n.u16}(ks,kp); kp=kp+2
+      local idxs={}
+      for j=1,nf do idxs[j]=${n.u16}(ks,kp); kp=kp+2 end
+      ${n.desc}[i]={1,idxs}
+    elseif tag==${n.TAGN} then
+      ${n.desc}[i]={2,${n.u16}(ks,kp)}
+      kp=kp+2
+    else ${n.err}("g",0) end
+  end
+  local function ${n.kz}(i)
+    local d=${n.desc}[i]
+    if d==nil then ${n.err}("g",0) end
+    if d[1]==1 then
+      local parts={}
+      local idxs=d[2]
+      for j=1,#idxs do parts[j]=${n.strAt}(idxs[j],key) end
+      return ${n.concat}(parts)
+    end
+    local s=${n.numAt}(d[2],key)
+    if s=="-0" then return -0 end
+    local v=${n.tonum}(s)
+    if v==nil then ${n.err}("v",0) end
+    return v
+  end
+  local R={}
+  for i=1,nparams do R[i]=${n.sel}(i,...) end
+  local st={${F.R}=R,${F.i}=1,${F.top}=nparams,${F.kz}=${n.kz},${F.jumps}=${F.jumps},${F.chains}=${F.chains},${F.nins}=nins,${F.stop}=0,${F.ret}={},${F.nret}=0,${F.roll}=0,${F.pos}=1}
+  local function ${n.take}(st)
+    local i=st.${F.pos}
+    st.${F.pos}=i+1
+    return ${n.byte}(bc,i)
+  end
+  local ${n.ord}=${ordLua}
+  while st.${F.i}<=st.${F.nins} and st.${F.stop}==0 do
+    local ii=st.${F.i}
+    st.${F.pos}=st.${F.jumps}[ii]
+    local chain=st.${F.chains}[ii]
+    local z={}
+    for p=1,13 do z[${n.ord}[p]]=${n.take}(st) end
+    local m=${n.mix}(${n.bxor}(chain,${n.umul}(ii,${n.ADODD})))
+    local x=m
+    for p=1,13 do
+      x=${n.mix}(${n.bxor}(x,${n.umul}(p,${n.LANE})))
+      z[p]=${n.xor8}(z[p],x%256)
+    end
+    local token=${n.bxor}(z[1]+z[2]*256+z[3]*65536+z[4]*16777216,m)
+    local sb=z[5]
+    local a=z[6]+z[7]*256
+    if a>=32768 then a=a-65536 end
+    local b=z[8]+z[9]*256+z[10]*65536
+    if b>=8388608 then b=b-16777216 end
+    local c=z[11]+z[12]*256+z[13]*65536
+    if c>=8388608 then c=c-16777216 end
+    st.${F.i}=ii+1
+    local hn=${n.HND}[token]
+    if hn==nil then ${n.err}("h",0) end
+    hn(st,a,b,c,sb)
+  end
+  if st.${F.stop}~=0 then return ${n.unpack}(st.${F.ret},1,st.${F.nret}) end
+end
+local function __DF_KSUM(s)
+  if type(s)~="string" then return -1 end
+  local h=${n.BASIS}
+  for i=1,#s do h=(${n.umul}(h,${n.PRIME})+${n.byte}(s,i))%4294967296 end
+  return h
+end
+local function __DF_CRASH()
+  ${n.err}("crash",0)
+end
+${user}`;
+  const entry = id();
+  fields.push(`${entry}=function(${n.hp},...)\n${body}\nend`);
+  const shuffledFields = rng.shuffle(fields);
+  const padKey = keys.next();
+  const prefix = `return setmetatable({${shuffledFields.join(",")}`;
+  const suffix = `},{__index=function()return nil end}):${entry}(...)\n`;
+  const open = `,[${padKey}]="`;
+  const close = `"`;
+  const minBytes = Number.isFinite(opt.minBytes) ? Math.max(0, Math.floor(opt.minBytes)) : 512000;
+  const baseLen = prefix.length + open.length + close.length + suffix.length;
+  let pad = makePad(Math.max(48, minBytes - baseLen), params.basis ^ params.lane);
+  let source = prefix + open + pad + close + suffix;
+  while (source.length < minBytes) {
+    pad += "0";
+    source = prefix + open + pad + close + suffix;
+  }
+  if (/d4:[0-9a-f]+:[0-9a-f]+;d4:[0-9a-f]+:[0-9a-f]+/.test(source)) throw new Error("inert pad still contains a linear d4 record");
+  return { source, checksumValue: expect, stringBlobs: strings.length, numberBlobs: numbers.length, fused: fusedTotal };
+}
